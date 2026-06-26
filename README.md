@@ -136,16 +136,20 @@ Each project can have an agent profile that defines:
 
 ```
 ollama-chat/
-├── app.py                 # FastAPI backend
+├── app.py                      # FastAPI backend
 ├── templates/
-│   └── index.html         # Single-file frontend
+│   ├── index.html              # HTML layout + JavaScript
+│   └── style.css               # All CSS styles
 ├── Dockerfile
-├── docker-compose.yml     # Your config (not in repo)
+├── docker-compose.yml          # Your config (not in repo)
 ├── docker-compose.example.yml  # Template for config
 ├── .gitignore
 ├── LICENSE
-└── README.md
+├── README.md
+└── TEMPLATE_README.md          # Guide for customizing the frontend
 ```
+
+See [TEMPLATE_README.md](TEMPLATE_README.md) for a detailed guide on the file structure, how to customize themes, and how to add new features.
 
 ## License
 

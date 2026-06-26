@@ -28,6 +28,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/files", StaticFiles(directory=str(UPLOAD_DIR)), name="files")
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "templates")), name="static")
 
 # ---------------------------------------------------------------------------
 # Database
