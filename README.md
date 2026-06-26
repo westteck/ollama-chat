@@ -161,6 +161,8 @@ ollama-chat/
 
 See [TEMPLATE_README.md](TEMPLATE_README.md) for a detailed guide on the file structure, how to customize themes, and how to add new features.
 
+For frontend-specific instructions (editing HTML, CSS, and JavaScript), see [templates/README.md](templates/README.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
