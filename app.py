@@ -450,6 +450,67 @@ def guess_caps(model_name: str) -> list:
         caps = ["writing", "research"]
     return caps
 
+# Cache for model metadata from Ollama
+_model_meta_cache = {}
+
+async def get_model_caps_from_ollama(model_name: str, ollama_url: str) -> list:
+    """Query Ollama's /api/show for model metadata and infer capabilities."""
+    if model_name in _model_meta_cache:
+        return _model_meta_cache[model_name]
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(f"{ollama_url}/api/show", json={"name": model_name})
+            if resp.status_code != 200:
+                return guess_caps(model_name)
+            data = resp.json()
+            info = data.get("model_info", {})
+            basename = (info.get("general.basename") or "").lower()
+            arch = (info.get("general.architecture") or "").lower()
+            finetune = (info.get("general.finetune") or "").lower()
+            families = data.get("details", {}).get("families") or []
+            modelfile = data.get("modelfile") or ""
+            system_prompt = ""
+            for line in modelfile.split("\n"):
+                if line.startswith("SYSTEM"):
+                    system_prompt = line.lower()
+                    break
+
+            caps = []
+            combined = f"{basename} {arch} {finetune} {model_name.lower()} {system_prompt}"
+
+            # Coding models
+            if any(x in combined for x in ["coder", "code", "coding", "devstral", "starcoder"]):
+                caps.append("coding")
+            # Vision models — check known vision-capable families
+            if any(x in combined for x in ["vision", "gemma3", "minimax-m3", "kimi-k2", "gemini", "llava", "bakllava", "moondream"]):
+                caps.append("vision")
+            # Thinking/reasoning models
+            if any(x in combined for x in ["pro", "ultra", "super", "reasoning", "thinking", "nemotron"]):
+                caps.append("thinking")
+            # Tools — models that support function calling
+            if any(x in combined for x in ["tools", "function", "tool"]):
+                caps.append("tools")
+            # Writing — most models can do this
+            caps.append("writing")
+            # Research — most models can do this
+            caps.append("research")
+            # Fiction/nonfiction — general purpose models
+            if not caps or len(caps) <= 3:
+                caps.extend(["fiction", "nonfiction"])
+
+            # Deduplicate while preserving order
+            seen = set()
+            result = []
+            for c in caps:
+                if c not in seen:
+                    seen.add(c)
+                    result.append(c)
+
+            _model_meta_cache[model_name] = result
+            return result
+    except Exception:
+        return guess_caps(model_name)
+
 
 # ---------------------------------------------------------------------------
 # Routes: Models & Health
@@ -467,8 +528,16 @@ async def list_models(request: Request):
             all_models = [m["name"] for m in data.get("models", [])]
         # Filter hidden models for this user
         hidden = set(user.get("hidden_models", "").split(",")) if user.get("hidden_models") else set()
-        # Add capabilities for each model
-        all_with_caps = [{"name": m, "caps": MODEL_CAPS.get(m, MODEL_CAPS.get(m.split(":")[0], guess_caps(m)))} for m in all_models]
+        # Add capabilities for each model — use MODEL_CAPS override, then query Ollama
+        all_with_caps = []
+        for m in all_models:
+            if m in MODEL_CAPS:
+                caps = MODEL_CAPS[m]
+            elif m.split(":")[0] in MODEL_CAPS:
+                caps = MODEL_CAPS[m.split(":")[0]]
+            else:
+                caps = await get_model_caps_from_ollama(m, ollama_url)
+            all_with_caps.append({"name": m, "caps": caps})
         visible_with_caps = [m for m in all_with_caps if m["name"] not in hidden]
         default_m = get_user_default_model(user)
         return {"models": visible_with_caps, "all_models": all_with_caps, "default": default_m}
