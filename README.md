@@ -4,6 +4,16 @@ A self-hosted, ChatGPT-style web interface for [Ollama](https://ollama.com), bui
 
 ![Ollama Chat](https://img.shields.io/badge/Ollama-Chat-7c4dff)
 
+## Screenshots
+
+**Login Screen**
+
+![Login Screen](screenshots/ollama-chat-login.png)
+
+**Main Chat Interface**
+
+![Main Chat](screenshots/ollama-chat-main.png)
+
 ## Features
 
 - **ChatGPT-style interface** — Clean, dark/light theme, streaming responses, markdown rendering
