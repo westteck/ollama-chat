@@ -4,8 +4,9 @@ This folder contains the frontend for Ollama Chat. Everything is split across tw
 
 | File | Contains |
 |------|----------|
-| `index.html` | HTML layout + all JavaScript (app logic, API calls, rendering) |
+| `index.html` | HTML layout only (login screen, sidebar, chat area, modals) |
 | `style.css` | All CSS styling (themes, layout, components, animations) |
+| `app.js` | All JavaScript (app logic, API calls, rendering, streaming) |
 
 No build step. No npm. No framework. Just edit and refresh.
 

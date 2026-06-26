@@ -8,15 +8,17 @@ This document explains the file structure and how to customize the Ollama Chat f
 ollama-chat/
 ├── app.py                      # FastAPI backend (all API routes, DB, tool calling)
 ├── templates/
-│   ├── index.html              # HTML layout + JavaScript (all app logic)
-│   └── style.css               # All CSS styles (themes, layout, components)
-├── Dockerfile                  # Docker build config
+│   ├── index.html              # HTML layout only (no inline CSS or JS)
+│   ├── style.css               # All CSS styles (themes, layout, components)
+│   ├── app.js                  # All JavaScript (app logic, API calls, rendering)
+│   └── README.md               # Guide for customizing the frontend
+├── Dockerfile
 ├── docker-compose.example.yml  # Template for docker-compose.yml
 ├── .gitignore
 ├── LICENSE
-└── README.md
+├── README.md
+└── TEMPLATE_README.md          # This file
 ```
-
 ## templates/index.html
 
 The HTML file contains:
