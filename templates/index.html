@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Chat</title>
+    <style>
+        /* Theme variables */
+        :root[data-theme="dark"] {
+            --bg: #1a1a2e; --bg-sidebar: #16213e; --bg-chat: #0f0f23;
+            --bg-msg-user: #2a2a4a; --bg-msg-assistant: #1e1e38; --bg-input: #1a1a2e;
+            --bg-card: #1e1e38; --text: #e0e0e0; --text-muted: #888; --text-dim: #555;
+            --accent: #7c4dff; --accent-hover: #651fff; --accent-dim: rgba(124,77,255,0.15);
+            --green: #4caf50; --orange: #ff9800; --red: #f44336; --border: #2a2a4a;
+            --radius: 12px; --shadow: rgba(0,0,0,0.3);
+        }
+        :root[data-theme="light"] {
+            --bg: #f5f5f7; --bg-sidebar: #ffffff; --bg-chat: #f0f0f5;
+            --bg-msg-user: #e8eaf0; --bg-msg-assistant: #ffffff; --bg-input: #ffffff;
+            --bg-card: #ffffff; --text: #1a1a2e; --text-muted: #666; --text-dim: #aaa;
+            --accent: #7c4dff; --accent-hover: #651fff; --accent-dim: rgba(124,77,255,0.1);
+            --green: #4caf50; --orange: #ff9800; --red: #f44336; --border: #e0e0e8;
+            --radius: 12px; --shadow: rgba(0,0,0,0.08);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text); overflow: hidden; transition: background 0.3s, color 0.3s; }
+        .app { display: flex; height: 100vh; }
+
+        /* Login screen */
+        .login-screen { display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--bg); }
+        .login-card { background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 20px;
+            padding: 48px 40px; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 8px 32px var(--shadow); }
+        .login-card h1 { font-size: 28px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+        .login-card p { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; }
+        .login-card input { width: 100%; padding: 14px 16px; background: var(--bg-input); color: var(--text);
+            border: 2px solid var(--border); border-radius: 12px; font-size: 16px; margin-bottom: 16px; transition: border-color 0.2s; }
+        .login-card input:focus { outline: none; border-color: var(--accent); }
+        .login-card button { width: 100%; padding: 14px; background: var(--accent); color: white; border: none;
+            border-radius: 12px; cursor: pointer; font-size: 16px; font-weight: 600; transition: background 0.2s; }
+        .login-card button:hover { background: var(--accent-hover); }
+        .login-error { color: var(--red); font-size: 14px; margin-top: 12px; min-height: 20px; }
+
+        /* Sidebar */
+        .sidebar { width: 280px; background: var(--bg-sidebar); border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; transition: margin-left 0.3s, background 0.3s; }
+        .sidebar.collapsed { margin-left: -280px; }
+        .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+        .sidebar-header h1 { font-size: 18px; font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+        .sidebar-header h1::before { content: "◆"; font-size: 14px; }
+
+        .sidebar-tabs { display: flex; padding: 8px 12px; gap: 4px; border-bottom: 1px solid var(--border); }
+        .sidebar-tab { flex: 1; padding: 8px; text-align: center; font-size: 13px; color: var(--text-muted);
+            cursor: pointer; border-radius: 8px; transition: all 0.2s; }
+        .sidebar-tab:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+        [data-theme="light"] .sidebar-tab:hover { background: rgba(0,0,0,0.04); }
+        .sidebar-tab.active { background: var(--accent-dim); color: var(--accent); font-weight: 500; }
+
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 8px; }
+        .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
+        .model-select { width: 100%; padding: 8px 12px; background: var(--bg-input); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
+        .model-select:focus { outline: none; border-color: var(--accent); }
+        .user-info { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; align-items: center;
+            gap: 8px; font-size: 13px; color: var(--text-muted); }
+        .user-info .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+            color: white; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
+        .user-info .logout-btn { margin-left: auto; color: var(--text-dim); cursor: pointer; font-size: 18px; }
+        .user-info .logout-btn:hover { color: var(--red); }
+
+        .new-btn { margin: 8px 12px; padding: 10px 16px; background: var(--accent); color: white; border: none;
+            border-radius: var(--radius); cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.2s; }
+        .new-btn:hover { background: var(--accent-hover); }
+
+        /* List items */
+        .list-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 14px;
+            color: var(--text-muted); transition: background 0.2s; margin-bottom: 2px; position: relative; }
+        .list-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+        [data-theme="light"] .list-item:hover { background: rgba(0,0,0,0.04); }
+        .list-item.active { background: var(--accent-dim); color: var(--text); }
+        .list-item .item-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; padding-right: 20px; }
+        .list-item .item-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; display: flex; gap: 8px; }
+        .list-item .item-meta .badge { background: var(--border); padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+        .list-item .pin-icon { position: absolute; right: 8px; top: 10px; font-size: 14px; color: var(--accent); }
+        .list-item .chat-actions { position: absolute; right: 4px; top: 8px; display: none; gap: 4px; }
+        .list-item:hover .chat-actions { display: flex; }
+        .list-item .chat-actions button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: 4px; }
+        .list-item .chat-actions button:hover { color: var(--text); background: rgba(255,255,255,0.1); }
+
+        /* Search */
+        .search-bar { padding: 8px 12px; }
+        .search-bar input { width: 100%; padding: 8px 12px; background: var(--bg-input); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+        .search-bar input:focus { outline: none; border-color: var(--accent); }
+        .search-results { padding: 4px 8px; }
+        .search-result-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px;
+            background: var(--bg-card); border: 1px solid var(--border); }
+        .search-result-item:hover { border-color: var(--accent); }
+        .search-result-item .sr-title { font-size: 13px; font-weight: 500; color: var(--text); }
+        .search-result-item .sr-snippet { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+        .search-result-item .sr-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+        /* Main area */
+        .main { flex: 1; display: flex; flex-direction: column; background: var(--bg-chat); transition: background 0.3s; }
+        .main-header { padding: 12px 20px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 12px; }
+        .toggle-sidebar { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 20px; padding: 4px 8px; }
+        .toggle-sidebar:hover { color: var(--text); }
+        .main-header .title { font-size: 15px; color: var(--text-muted); flex: 1; }
+        .main-header .status-text { font-size: 14px; color: var(--text); font-weight: 500; }
+        .main-header .status-text .model-name { color: var(--accent); }
+        .main-header .project-badge { background: var(--accent-dim); color: var(--accent); padding: 4px 10px;
+            border-radius: 6px; font-size: 12px; font-weight: 500; }
+        .main-header .header-btn { background: none; border: 1px solid var(--border); color: var(--text-muted);
+            cursor: pointer; font-size: 14px; padding: 4px 10px; border-radius: 6px; transition: all 0.2s; }
+        .main-header .header-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .theme-toggle { background: none; border: 1px solid var(--border); color: var(--text-muted);
+            cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px; transition: all 0.2s; }
+        .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* Messages */
+        .messages { flex: 1; overflow-y: auto; padding: 20px 0; }
+        .message { max-width: 768px; margin: 0 auto; padding: 16px 24px; display: flex; gap: 16px; position: relative; }
+        .message .avatar { width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
+        .message.user .avatar { background: #4a6fa5; color: white; }
+        .message.assistant .avatar { background: var(--accent); color: white; }
+        .message .content { flex: 1; line-height: 1.6; font-size: 15px; overflow-x: auto; }
+        .message .content p { margin-bottom: 8px; }
+        .message .content pre { background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 8px;
+            padding: 12px 16px; overflow-x: auto; margin: 8px 0; position: relative; }
+        [data-theme="light"] .message .content pre { background: #f8f8fa; }
+        .message .content code { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 14px; }
+        .message .content :not(pre) > code { background: var(--accent-dim); padding: 2px 6px; border-radius: 4px; }
+        .message .content ul, .message .content ol { margin-left: 24px; margin-bottom: 8px; }
+        .message .content h1, .message .content h2, .message .content h3 { margin: 12px 0 6px; font-weight: 600; }
+        .message .msg-actions { position: absolute; right: 24px; top: 8px; display: none; gap: 6px; }
+        .message:hover .msg-actions { display: flex; }
+        .message .msg-actions button { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-muted);
+            cursor: pointer; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+        .message .msg-actions button:hover { color: var(--accent); border-color: var(--accent); }
+        .message .msg-time { font-size: 11px; color: var(--text-dim); margin-top: 4px; display: none; }
+        .message:hover .msg-time { display: block; }
+        .code-copy-btn { position: absolute; right: 8px; top: 8px; background: var(--bg-input); border: 1px solid var(--border);
+            color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 2px 8px; border-radius: 4px; opacity: 0.7; }
+        .code-copy-btn:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
+
+        .typing-indicator { display: inline-flex; gap: 4px; padding: 8px 0; }
+        .typing-indicator span { width: 8px; height: 8px; background: var(--text-muted); border-radius: 50%; animation: bounce 1.4s infinite; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        .tool-indicator { margin-bottom: 8px; }
+        .tool-indicator .tool-active { background: var(--accent-dim); color: var(--accent); padding: 6px 12px; border-radius: 8px; font-size: 13px; display: inline-block; }
+        .tool-indicator .tool-done { color: #4caf50; font-size: 13px; margin-bottom: 4px; }
+        .tool-indicator .tool-preview { background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--text-muted); max-height: 80px; overflow: hidden; margin-bottom: 8px; }
+        @keyframes bounce { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-8px); opacity: 1; } }
+
+        /* Welcome */
+        .welcome { max-width: 768px; margin: 0 auto; padding: 60px 24px; text-align: center; }
+        .welcome h2 { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+        .welcome p { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; }
+        .welcome .suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 600px; margin: 0 auto; }
+        .welcome .suggestion { padding: 16px; background: var(--bg-msg-assistant); border: 1px solid var(--border);
+            border-radius: var(--radius); cursor: pointer; text-align: left; transition: border-color 0.2s; }
+        .welcome .suggestion:hover { border-color: var(--accent); }
+        .welcome .suggestion .label { font-size: 14px; font-weight: 500; }
+        .welcome .suggestion .desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+        /* Input */
+        .input-area { padding: 16px 24px 24px; background: var(--bg-chat); }
+        .input-wrapper { max-width: 768px; margin: 0 auto; display: flex; gap: 12px; align-items: flex-end; }
+        .input-wrapper textarea { flex: 1; padding: 12px 16px; background: var(--bg-input); color: var(--text);
+            border: 1px solid var(--border); border-radius: var(--radius); font-size: 15px; font-family: inherit;
+            resize: none; max-height: 200px; min-height: 48px; transition: border-color 0.2s; }
+        .input-wrapper textarea:focus { outline: none; border-color: var(--accent); }
+        .send-btn { width: 48px; height: 48px; background: var(--accent); color: white; border: none;
+            border-radius: var(--radius); cursor: pointer; font-size: 18px; display: flex; align-items: center;
+            justify-content: center; transition: background 0.2s; flex-shrink: 0; }
+        .send-btn:hover { background: var(--accent-hover); }
+        .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Compare mode */
+        .compare-wrapper { display: flex; gap: 2px; max-width: 1200px; margin: 0 auto; }
+        .compare-panel { flex: 1; padding: 16px 24px; }
+        .compare-panel .panel-header { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        .compare-panel .panel-header select { font-size: 12px; padding: 4px 8px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+        .compare-panel .content { font-size: 14px; line-height: 1.6; min-height: 40px; }
+
+        /* Project view */
+        .project-view { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .project-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+        .project-color-dot { width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; }
+        .project-header h2 { font-size: 22px; font-weight: 600; }
+        .project-header .desc { color: var(--text-muted); font-size: 14px; margin-left: 8px; }
+        .project-section { margin-bottom: 32px; }
+        .project-section h3 { font-size: 16px; font-weight: 500; margin-bottom: 12px; color: var(--text-muted); }
+        .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+        .file-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 16px; display: flex; align-items: center; gap: 12px; }
+        .file-card .file-icon { width: 36px; height: 36px; border-radius: 8px; background: var(--accent-dim);
+            display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .file-card .file-info { flex: 1; min-width: 0; }
+        .file-card .file-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-card .file-size { font-size: 12px; color: var(--text-dim); }
+        .file-card .file-delete { color: var(--red); cursor: pointer; opacity: 0.5; font-size: 16px; }
+        .file-card .file-delete:hover { opacity: 1; }
+        .chat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+        .chat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 16px; cursor: pointer; transition: border-color 0.2s; }
+        .chat-card:hover { border-color: var(--accent); }
+        .chat-card .cc-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+        .chat-card .cc-meta { font-size: 12px; color: var(--text-dim); }
+        .chat-card .cc-delete { color: var(--red); cursor: pointer; opacity: 0.5; font-size: 14px; float: right; }
+        .chat-card .cc-delete:hover { opacity: 1; }
+        .agent-badge { background: var(--accent-dim); color: var(--accent); padding: 4px 10px; border-radius: 6px; font-size: 12px; margin-top: 8px; display: inline-block; }
+
+        /* File viewer modal */
+        .file-viewer-content { max-height: 60vh; overflow-y: auto; background: var(--bg-chat); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6);
+            display: flex; align-items: center; justify-content: center; z-index: 200; }
+        .modal { background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 24px; min-width: 400px; max-width: 500px; max-height: 80vh; overflow-y: auto; }
+        .modal h3 { font-size: 18px; margin-bottom: 16px; }
+        .modal label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+        .modal input, .modal textarea, .modal select { width: 100%; padding: 10px 12px; background: var(--bg-input); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; font-size: 14px; font-family: inherit; margin-bottom: 12px; }
+        .modal input:focus, .modal textarea:focus, .modal select:focus { outline: none; border-color: var(--accent); }
+        .modal .color-picker { display: flex; gap: 8px; margin-bottom: 12px; }
+        .modal .color-dot { width: 28px; height: 28px; border-radius: 6px; cursor: pointer; border: 2px solid transparent; }
+        .modal .color-dot.selected { border-color: var(--text); }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+        .modal-btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .modal-btn.primary { background: var(--accent); color: white; }
+        .modal-btn.primary:hover { background: var(--accent-hover); }
+        .modal-btn.secondary { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; z-index: 100; height: 100%; }
+            .welcome .suggestions { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-card">
+            <h1>◆ Ollama Chat</h1>
+            <p>Enter your name to start chatting</p>
+            <input type="text" id="loginInput" placeholder="Your name..." maxlength="30"
+                onkeydown="if(event.key==='Enter')doLogin()" />
+            <button onclick="doLogin()">Continue →</button>
+            <div class="login-error" id="loginError"></div>
+        </div>
+    </div>
+
+    <!-- Main App (hidden until login) -->
+    <div class="app" id="mainApp" style="display:none;">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header"><h1>Ollama Chat</h1></div>
+            <div class="sidebar-tabs">
+                <div class="sidebar-tab active" data-tab="chats" onclick="switchTab('chats')">Chats</div>
+                <div class="sidebar-tab" data-tab="projects" onclick="switchTab('projects')">Projects</div>
+                <div class="sidebar-tab" data-tab="search" onclick="switchTab('search')">Search</div>
+            </div>
+            <div class="search-bar" id="searchBar" style="display:none;">
+                <input type="text" id="searchInput" placeholder="Search messages..." oninput="doSearch()" />
+            </div>
+            <div class="sidebar-content" id="sidebarContent"></div>
+            <div class="sidebar-footer">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select class="model-select" id="modelSelect" onchange="changeModel()" style="flex:1;">
+                        <option value="">Loading models...</option>
+                    </select>
+                    <button class="model-settings-btn" onclick="openModelSettings()" title="Manage models" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-muted);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;flex-shrink:0;">⚙</button>
+                </div>
+            </div>
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar">U</div>
+                <span id="userNameDisplay">User</span>
+                <span class="logout-btn" onclick="doLogout()" title="Switch user">⏻</span>
+            </div>
+        </div>
+        <div class="main">
+            <div class="main-header">
+                <button class="toggle-sidebar" onclick="toggleSidebar()">☰</button>
+                <span class="title" id="chatTitle">New Chat</span>
+                <span class="project-badge" id="projectBadge" style="display:none;"></span>
+                <span class="status-text" id="statusText"></span>
+                <button class="header-btn" id="compareBtn" onclick="toggleCompare()" title="Compare two models">⇄</button>
+                <button class="header-btn" id="exportBtn" onclick="exportChat()" title="Export chat" style="display:none;">⬇</button>
+                <button class="header-btn" onclick="showSettings()" title="Settings">⚙</button>
+                <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
+            </div>
+            <div class="messages" id="messages"></div>
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea id="input" placeholder="Send a message... (Shift+Enter for newline)" rows="1"
+                        onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Modal -->
+    <div class="modal-overlay" id="projectModal" style="display:none;">
+        <div class="modal" style="max-width:560px;">
+            <h3 id="modalTitle">New Project</h3>
+            <label>Project Name</label>
+            <input type="text" id="projectName" placeholder="My Project" />
+            <label>Description (optional)</label>
+            <textarea id="projectDesc" rows="2" placeholder="What is this project about?"></textarea>
+            <label>Color</label>
+            <div class="color-picker" id="colorPicker"></div>
+
+            <!-- Agent Profile Section -->
+            <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Agent Profile (optional)</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Set a custom AI personality, system prompt, and preferred model for this project.</p>
+                <label>Agent Name</label>
+                <input type="text" id="agentName" placeholder="e.g. Python Expert, Creative Writer..." />
+                <label>System Prompt</label>
+                <textarea id="agentPrompt" rows="3" placeholder="You are an expert Python developer who writes clean, well-documented code..."></textarea>
+                <label>Preferred Model (overrides dropdown)</label>
+                <select id="agentModel"><option value="">Use dropdown model</option></select>
+            </div>
+
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeModal()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveProject()" id="saveProjectBtn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Settings Modal -->
+    <div class="modal-overlay" id="modelSettingsModal" style="display:none;">
+        <div class="modal" style="max-width:420px;">
+            <h3>Manage Models</h3>
+            <p style="color:var(--text-muted);font-size:13px;margin:0 0 12px 0;">Uncheck models to hide them from your dropdown.</p>
+            <div id="modelSettingsList" style="max-height:300px;overflow-y:auto;margin-bottom:16px;"></div>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeModelSettings()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveModelSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Viewer Modal -->
+    <div class="modal-overlay" id="fileViewerModal" style="display:none;">
+        <div class="modal" style="max-width:700px;">
+            <h3 id="fileViewerTitle">File</h3>
+            <div class="file-viewer-content" id="fileViewerContent"></div>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="document.getElementById('fileViewerModal').style.display='none'">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal" style="display:none;">
+        <div class="modal" style="max-width:520px;">
+            <h3>⚙ Settings</h3>
+
+            <!-- Connection Settings -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Ollama Connection</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">URL of your Ollama instance. Leave blank to use the default from docker-compose.</p>
+                <label>Ollama URL</label>
+                <input type="text" id="settingsOllamaUrl" placeholder="http://host.docker.internal:11434" />
+                <div id="ollamaTestResult" style="font-size:13px;margin-bottom:12px;"></div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="modal-btn secondary" onclick="testOllamaConnection()">Test Connection</button>
+                </div>
+            </div>
+
+            <!-- SearXNG Settings -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">SearXNG Search (optional)</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">URL of your SearXNG instance for web search tool. Leave blank to use the default.</p>
+                <label>SearXNG URL</label>
+                <input type="text" id="settingsSearxngUrl" placeholder="http://host.docker.internal:9090" />
+                <div id="searxngTestResult" style="font-size:13px;margin-bottom:12px;"></div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="modal-btn secondary" onclick="testSearxngConnection()">Test Connection</button>
+                </div>
+            </div>
+
+            <!-- Default Model -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Default Model</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Model selected by default when starting a new chat. Leave blank to use the default from docker-compose.</p>
+                <label>Default Model</label>
+                <select id="settingsDefaultModel"><option value="">Use server default</option></select>
+            </div>
+
+            <!-- Model Visibility -->
+            <div>
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Model Visibility</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Choose which models appear in your dropdown.</p>
+                <button class="modal-btn secondary" onclick="closeSettings();openModelSettings();">Manage Models</button>
+            </div>
+
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeSettings()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        let userId = null, username = '', userTheme = 'dark';
+        let currentModel = '', currentTab = 'chats', currentChatId = null, currentProjectId = null;
+        let isStreaming = false, chats = [], projects = [], searchResults = [];
+        let selectedColor = '#7c4dff';
+        let compareMode = false, editingProjectId = null;
+        let allModelsList = [];
+        const colors = ['#7c4dff', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#e91e63', '#00bcd4', '#8bc34a'];
+
+        // ---------- Init ----------
+        window.onload = async () => {
+            const saved = localStorage.getItem('ollama-chat-user');
+            if (saved) {
+                try {
+                    const user = JSON.parse(saved);
+                    await loginWithId(user.user_id);
+                } catch (e) { showLogin(); }
+            } else { showLogin(); }
+        };
+
+        function showLogin() {
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('loginInput').focus();
+        }
+
+        function showApp() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'flex';
+        }
+
+        // ---------- Auth ----------
+        async function doLogin() {
+            const name = document.getElementById('loginInput').value.trim();
+            const errEl = document.getElementById('loginError');
+            errEl.textContent = '';
+            if (!name) { errEl.textContent = 'Please enter your name'; return; }
+            try {
+                const resp = await fetch('/api/login', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ username: name })
+                });
+                const data = await resp.json();
+                if (data.error) { errEl.textContent = data.error; return; }
+                localStorage.setItem('ollama-chat-user', JSON.stringify(data));
+                await loginWithId(data.user_id);
+            } catch (e) { errEl.textContent = 'Connection error'; }
+        }
+
+        async function loginWithId(uid) {
+            try {
+                const resp = await fetch(`/api/me?user_id=${uid}`);
+                const data = await resp.json();
+                if (data.error) { showLogin(); return; }
+                userId = data.id; username = data.username; userTheme = data.theme || 'dark';
+                applyTheme(userTheme);
+                document.getElementById('userNameDisplay').textContent = username;
+                document.getElementById('userAvatar').textContent = username.charAt(0).toUpperCase();
+                showApp();
+                await loadModels();
+                await loadProjects();
+                await loadChats();
+                renderSidebar();
+                showWelcome();
+                updateStatusText();
+            } catch (e) { showLogin(); }
+        }
+
+        function doLogout() {
+            localStorage.removeItem('ollama-chat-user');
+            userId = null; username = '';
+            showLogin();
+            document.getElementById('loginInput').value = '';
+        }
+
+        // ---------- Theme ----------
+        function applyTheme(theme) {
+            userTheme = theme;
+            document.documentElement.setAttribute('data-theme', theme);
+            document.getElementById('themeBtn').textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+        async function toggleTheme() {
+            const newTheme = userTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+            await fetch('/api/theme', { method: 'PUT', headers: {'Content-Type':'application/json','X-User-Id':userId},
+                body: JSON.stringify({ theme: newTheme }) });
+        }
+
+        // ---------- Status text ----------
+        function updateStatusText() {
+            const el = document.getElementById('statusText');
+            const model = currentModel || 'Ollama';
+            el.innerHTML = `${escapeHtml(username)} is chatting with <span class="model-name">${escapeHtml(model)}</span>`;
+        }
+
+        // ---------- API helper ----------
+        async function api(path, opts = {}) {
+            const headers = opts.headers || {};
+            headers['X-User-Id'] = userId;
+            if (opts.body && !(opts.body instanceof FormData) && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+            const resp = await fetch(path, { ...opts, headers });
+            return resp;
+        }
+
+        // ---------- Models ----------
+        let capLabels = {};
+        async function loadCapLabels() {
+            try {
+                const resp = await fetch('/api/models/cap-labels');
+                const data = await resp.json();
+                capLabels = data.labels || {};
+            } catch (e) {}
+        }
+        async function loadModels() {
+            try {
+                if (!Object.keys(capLabels).length) await loadCapLabels();
+                const resp = await fetch('/api/models', { headers: {'X-User-Id': userId} });
+                const data = await resp.json();
+                const sel = document.getElementById('modelSelect');
+                if (data.error) { sel.innerHTML = `<option value="">Error</option>`; return; }
+                allModelsList = data.all_models || data.models || [];
+                sel.innerHTML = '';
+                data.models.forEach(m => {
+                    const name = typeof m === 'string' ? m : m.name;
+                    const caps = typeof m === 'string' ? [] : (m.caps || []);
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name + (caps.length ? '  ' + caps.map(c => capLabels[c] || c).join(' ') : '');
+                    if (name === data.default) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+                currentModel = sel.value || data.default;
+                updateStatusText();
+                // Also populate agent model select
+                const agentSel = document.getElementById('agentModel');
+                if (agentSel) {
+                    agentSel.innerHTML = '<option value="">Use dropdown model</option>';
+                    allModelsList.forEach(m => {
+                        const name = typeof m === 'string' ? m : m.name;
+                        const opt = document.createElement('option');
+                        opt.value = name; opt.textContent = name;
+                        agentSel.appendChild(opt);
+                    });
+                }
+            } catch (e) { document.getElementById('modelSelect').innerHTML = `<option value="">Failed</option>`; }
+        }
+        function changeModel() { currentModel = document.getElementById('modelSelect').value; updateStatusText(); }
+
+        // ---------- Model Settings ----------
+        async function openModelSettings() {
+            if (!Object.keys(capLabels).length) await loadCapLabels();
+            const resp = await fetch('/api/models', { headers: {'X-User-Id': userId} });
+            const data = await resp.json();
+            if (data.error) { alert('Cannot connect to Ollama'); return; }
+            const hiddenResp = await fetch('/api/models/hidden', { headers: {'X-User-Id': userId} });
+            const hiddenData = await hiddenResp.json();
+            const hiddenSet = new Set(hiddenData.hidden || []);
+            const list = document.getElementById('modelSettingsList');
+            list.innerHTML = '';
+            const allModels = data.all_models || data.models || [];
+            allModels.forEach(m => {
+                const name = typeof m === 'string' ? m : m.name;
+                const caps = typeof m === 'string' ? [] : (m.caps || []);
+                const row = document.createElement('label');
+                row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:10px 12px;cursor:pointer;border-radius:8px;flex-wrap:wrap;';
+                row.onmouseenter = () => row.style.background = 'var(--bg-sidebar)';
+                row.onmouseleave = () => row.style.background = '';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.value = name;
+                cb.checked = !hiddenSet.has(name);
+                cb.style.cssText = 'width:18px;height:18px;accent-color:var(--accent);margin-top:2px;flex-shrink:0;';
+                const textDiv = document.createElement('div');
+                textDiv.style.cssText = 'flex:1;min-width:0;';
+                const nameSpan = document.createElement('div');
+                nameSpan.textContent = name;
+                nameSpan.style.cssText = 'font-size:14px;font-weight:500;';
+                textDiv.appendChild(nameSpan);
+                if (caps.length) {
+                    const capsDiv = document.createElement('div');
+                    capsDiv.style.cssText = 'margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;';
+                    caps.forEach(c => {
+                        const tag = document.createElement('span');
+                        tag.textContent = capLabels[c] || c;
+                        tag.style.cssText = 'font-size:10px;padding:2px 6px;border-radius:4px;background:var(--accent-dim);color:var(--accent);';
+                        capsDiv.appendChild(tag);
+                    });
+                    textDiv.appendChild(capsDiv);
+                }
+                row.appendChild(cb);
+                row.appendChild(textDiv);
+                list.appendChild(row);
+            });
+            document.getElementById('modelSettingsModal').style.display = 'flex';
+        }
+        function closeModelSettings() { document.getElementById('modelSettingsModal').style.display = 'none'; }
+        async function saveModelSettings() {
+            const checkboxes = document.querySelectorAll('#modelSettingsList input[type=checkbox]');
+            const hidden = [];
+            checkboxes.forEach(cb => { if (!cb.checked) hidden.push(cb.value); });
+            await fetch('/api/models/hidden', {
+                method: 'PUT', headers: {'Content-Type':'application/json','X-User-Id':userId},
+                body: JSON.stringify({ hidden })
+            });
+            closeModelSettings();
+            await loadModels();
+        }
+
+        // ---------- Tabs ----------
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+            document.getElementById('searchBar').style.display = tab === 'search' ? 'block' : 'none';
+            renderSidebar();
+        }
+
+        // ---------- Projects ----------
+        async function loadProjects() {
+            const resp = await api('/api/projects');
+            const data = await resp.json();
+            projects = data.projects || [];
+        }
+        async function createProject(name, desc, color, agent) {
+            const body = { name, description: desc, color };
+            if (agent) { body.agent_name = agent.name || ''; body.agent_prompt = agent.prompt || ''; body.agent_model = agent.model || ''; }
+            const resp = await api('/api/projects', { method: 'POST', body: JSON.stringify(body) });
+            const data = await resp.json();
+            await loadProjects(); renderSidebar(); return data.id;
+        }
+        async function updateProject(id, body) {
+            await api(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+            await loadProjects(); renderSidebar();
+        }
+        async function deleteProject(id) {
+            if (!confirm('Delete this project and all its files?')) return;
+            await api(`/api/projects/${id}`, { method: 'DELETE' });
+            if (currentProjectId === id) { currentProjectId = null; showWelcome(); }
+            await loadProjects(); await loadChats(); renderSidebar();
+        }
+        function editProject(id) {
+            const p = projects.find(x => x.id === id); if (!p) return;
+            editingProjectId = id;
+            document.getElementById('modalTitle').textContent = 'Edit Project';
+            document.getElementById('projectName').value = p.name;
+            document.getElementById('projectDesc').value = p.description || '';
+            selectedColor = p.color || '#7c4dff';
+            renderColorPicker();
+            document.getElementById('agentName').value = p.agent_name || '';
+            document.getElementById('agentPrompt').value = p.agent_prompt || '';
+            document.getElementById('agentModel').value = p.agent_model || '';
+            document.getElementById('saveProjectBtn').textContent = 'Update';
+            document.getElementById('projectModal').style.display = 'flex';
+        }
+
+        // ---------- Chats ----------
+        async function loadChats() {
+            const resp = await api('/api/chats');
+            const data = await resp.json();
+            chats = data.chats || [];
+        }
+        async function createChat(projectId = null, title = 'New Chat') {
+            const resp = await api('/api/chats', { method: 'POST', body: JSON.stringify({ project_id: projectId, title, model: currentModel }) });
+            const data = await resp.json();
+            await loadChats(); return data.id;
+        }
+        async function selectChat(id) {
+            const resp = await api(`/api/chats/${id}`);
+            const data = await resp.json();
+            const chat = data.chat;
+            currentChatId = id; currentProjectId = chat.project_id;
+            renderSidebar(); renderMessages(data.messages);
+            document.getElementById('chatTitle').textContent = chat.title;
+            document.getElementById('exportBtn').style.display = 'inline-block';
+            updateProjectBadge();
+        }
+        async function deleteChat(id) {
+            await api(`/api/chats/${id}`, { method: 'DELETE' });
+            if (currentChatId === id) { currentChatId = null; showWelcome(); document.getElementById('exportBtn').style.display = 'none'; }
+            await loadChats(); renderSidebar();
+        }
+        async function togglePinChat(id) {
+            await api(`/api/chats/${id}/pin`, { method: 'PUT' });
+            await loadChats(); renderSidebar();
+        }
+
+        // ---------- Export ----------
+        async function exportChat() {
+            if (!currentChatId) return;
+            const resp = await api(`/api/chats/${currentChatId}/export?format=markdown`);
+            const data = await resp.json();
+            const blob = new Blob([data.content], { type: 'text/markdown' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = data.filename;
+            a.click(); URL.revokeObjectURL(a.href);
+        }
+
+        // ---------- Search ----------
+        let searchTimer;
+        async function doSearch() {
+            clearTimeout(searchTimer);
+            const q = document.getElementById('searchInput').value.trim();
+            if (!q) { searchResults = []; renderSidebar(); return; }
+            searchTimer = setTimeout(async () => {
+                const resp = await api(`/api/search?q=${encodeURIComponent(q)}`);
+                const data = await resp.json();
+                searchResults = data.results || [];
+                renderSidebar();
+            }, 300);
+        }
+
+        // ---------- Files ----------
+        async function uploadFile(projectId) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.onchange = async () => {
+                const file = input.files[0]; if (!file) return;
+                const formData = new FormData(); formData.append('file', file);
+                await api(`/api/files/${projectId}`, { method: 'POST', body: formData, headers: {} });
+                await showProject(projectId);
+            };
+            input.click();
+        }
+        async function deleteFile(fid, pid) {
+            await api(`/api/files/${fid}`, { method: 'DELETE' });
+            await showProject(pid);
+        }
+        async function viewFile(fid) {
+            const resp = await api(`/api/files/${fid}/content`);
+            const data = await resp.json();
+            document.getElementById('fileViewerTitle').textContent = data.filename || 'File';
+            document.getElementById('fileViewerContent').textContent = data.content || '[No content]';
+            document.getElementById('fileViewerModal').style.display = 'flex';
+        }
+
+        // ---------- Rendering ----------
+        function renderSidebar() {
+            const el = document.getElementById('sidebarContent');
+            if (currentTab === 'chats') el.innerHTML = renderChatsTab();
+            else if (currentTab === 'projects') el.innerHTML = renderProjectsTab();
+            else if (currentTab === 'search') el.innerHTML = renderSearchTab();
+        }
+
+        function renderChatsTab() {
+            let html = `<button class="new-btn" onclick="newChat()">+ New Chat</button>`;
+            const pinned = chats.filter(c => c.pinned);
+            if (pinned.length) {
+                html += `<div style="padding:4px 8px;font-size:12px;color:var(--text-dim);text-transform:uppercase;margin-top:8px;">📌 Pinned</div>`;
+                html += pinned.map(c => chatListItem(c)).join('');
+            }
+            const unpinnedUngrouped = chats.filter(c => !c.project_id && !c.pinned);
+            if (unpinnedUngrouped.length) {
+                html += `<div style="padding:4px 8px;font-size:12px;color:var(--text-dim);text-transform:uppercase;margin-top:8px;">General</div>`;
+                html += unpinnedUngrouped.map(c => chatListItem(c)).join('');
+            }
+            projects.forEach(p => {
+                const pChats = chats.filter(c => c.project_id === p.id && !c.pinned);
+                if (pChats.length) {
+                    html += `<div style="padding:4px 8px;font-size:12px;color:${p.color};text-transform:uppercase;margin-top:8px;display:flex;align-items:center;gap:6px;">
+                        <span style="width:8px;height:8px;background:${p.color};border-radius:2px;"></span>${escapeHtml(p.name)}</div>`;
+                    html += pChats.map(c => chatListItem(c)).join('');
+                }
+            });
+            if (!chats.length) html += `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px;">No chats yet</div>`;
+            return html;
+        }
+
+        function chatListItem(c) {
+            const active = c.id === currentChatId ? 'active' : '';
+            const pinIcon = c.pinned ? '<span class="pin-icon">📌</span>' : '';
+            return `<div class="list-item ${active}" onclick="selectChat('${c.id}')">
+                <div class="item-title">${escapeHtml(c.title)}</div>
+                <div class="item-meta"><span>${formatDate(c.updated)}</span></div>
+                ${pinIcon}
+                <div class="chat-actions" onclick="event.stopPropagation()">
+                    <button onclick="togglePinChat('${c.id}')" title="Pin/unpin">${c.pinned ? '📌' : '📍'}</button>
+                    <button onclick="if(confirm('Delete?'))deleteChat('${c.id}')" title="Delete">✕</button>
+                </div>
+            </div>`;
+        }
+
+        function renderProjectsTab() {
+            let html = `<button class="new-btn" onclick="openNewProjectModal()">+ New Project</button>`;
+            if (!projects.length) return html + `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px;">No projects yet</div>`;
+            html += projects.map(p => `
+                <div class="list-item" onclick="showProject('${p.id}')">
+                    <div class="item-title" style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:10px;height:10px;background:${p.color};border-radius:3px;flex-shrink:0;"></span>
+                        ${escapeHtml(p.name)}
+                    </div>
+                    <div class="item-meta">
+                        <span class="badge">${p.chat_count} chats</span>
+                        <span class="badge">${p.file_count} files</span>
+                        ${p.agent_name ? `<span class="badge" style="color:var(--accent);">🤖 ${escapeHtml(p.agent_name)}</span>` : ''}
+                    </div>
+                    <div class="chat-actions" onclick="event.stopPropagation()">
+                        <button onclick="editProject('${p.id}')" title="Edit">✎</button>
+                        <button onclick="if(confirm('Delete project?'))deleteProject('${p.id}')" title="Delete">✕</button>
+                    </div>
+                </div>`).join('');
+            return html;
+        }
+
+        function renderSearchTab() {
+            if (!searchResults.length) return `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px;">Type to search all your messages</div>`;
+            return `<div class="search-results">${searchResults.map(r => `
+                <div class="search-result-item" onclick="selectChat('${r.chat_id}')">
+                    <div class="sr-title">${escapeHtml(r.chat_title)}</div>
+                    <div class="sr-snippet">${escapeHtml(r.snippet)}</div>
+                    <div class="sr-meta">${r.role} · ${formatDate(r.created)}</div>
+                </div>`).join('')}</div>`;
+        }
+
+        function renderMessages(messages) {
+            const container = document.getElementById('messages');
+            if (!messages || !messages.length) { showWelcome(); return; }
+            container.innerHTML = '';
+            messages.forEach(msg => container.appendChild(createMessageElement(msg.role, msg.content, msg.id, msg.created)));
+            container.scrollTop = container.scrollHeight;
+            addCopyButtonsToCodeBlocks(container);
+        }
+
+        function createMessageElement(role, content, msgId, created) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.dataset.msgId = msgId || '';
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = role === 'user' ? username.charAt(0).toUpperCase() : '◆';
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'content';
+            if (role === 'assistant') contentDiv.innerHTML = marked.parse(content || '');
+            else contentDiv.textContent = content;
+            // Message actions (edit, regenerate, copy)
+            const actions = document.createElement('div');
+            actions.className = 'msg-actions';
+            if (role === 'user') {
+                actions.innerHTML = `<button onclick="editMessage(this)" title="Edit">✎</button>`;
+            } else if (role === 'assistant') {
+                actions.innerHTML = `<button onclick="regenerateResponse()" title="Regenerate">↻</button>`;
+            }
+            actions.innerHTML += `<button onclick="copyMessage(this)" title="Copy">📋</button>`;
+            // Timestamp
+            if (created) {
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'msg-time';
+                timeDiv.textContent = new Date(created * 1000).toLocaleString();
+                contentDiv.appendChild(timeDiv);
+            }
+            div.appendChild(avatar);
+            div.appendChild(contentDiv);
+            div.appendChild(actions);
+            return div;
+        }
+
+        function addCopyButtonsToCodeBlocks(container) {
+            container.querySelectorAll('pre').forEach(pre => {
+                if (pre.querySelector('.code-copy-btn')) return;
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.textContent = 'Copy';
+                btn.onclick = () => {
+                    const code = pre.querySelector('code');
+                    navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+                    btn.textContent = '✓'; setTimeout(() => btn.textContent = 'Copy', 1500);
+                };
+                pre.appendChild(btn);
+            });
+        }
+
+        function copyMessage(btn) {
+            const content = btn.closest('.message').querySelector('.content');
+            const text = content.innerText;
+            navigator.clipboard.writeText(text);
+            btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1500);
+        }
+
+        function editMessage(btn) {
+            const msgDiv = btn.closest('.message');
+            const contentDiv = msgDiv.querySelector('.content');
+            const msgId = msgDiv.dataset.msgId;
+            const oldText = contentDiv.innerText.split('\n').filter(l => !l.match(/^\d{1,2}:\d{2}.*\d{4}/) && !l.match(/^[A-Za-z]{3} \d/)).join('\n').trim();
+            const textarea = document.createElement('textarea');
+            textarea.value = oldText;
+            textarea.style.cssText = 'width:100%;min-height:80px;padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--accent);border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;';
+            contentDiv.innerHTML = '';
+            contentDiv.appendChild(textarea);
+            textarea.focus();
+            const saveBtn = document.createElement('button');
+            saveBtn.textContent = 'Save & Resend';
+            saveBtn.style.cssText = 'margin-top:8px;padding:6px 14px;background:var(--accent);color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;';
+            saveBtn.onclick = async () => {
+                const newText = textarea.value.trim();
+                if (!newText || !msgId) return;
+                await api(`/api/chats/${currentChatId}/messages/${msgId}`, { method: 'PUT', body: JSON.stringify({ content: newText }) });
+                // Reload chat to resend
+                await selectChat(currentChatId);
+            };
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.style.cssText = 'margin-top:8px;margin-left:8px;padding:6px 14px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;';
+            cancelBtn.onclick = () => { selectChat(currentChatId); };
+            contentDiv.appendChild(saveBtn);
+            contentDiv.appendChild(cancelBtn);
+        }
+
+        async function regenerateResponse() {
+            if (isStreaming || !currentChatId) return;
+            // Find last assistant message, delete it, then resend
+            const resp = await api(`/api/chats/${currentChatId}`);
+            const data = await resp.json();
+            const msgs = data.messages || [];
+            if (msgs.length < 2) return;
+            const lastAssistant = msgs[msgs.length - 1];
+            if (lastAssistant.role !== 'assistant') return;
+            // Delete last assistant message
+            await api(`/api/chats/${currentChatId}/messages/${lastAssistant.id}`, { method: 'DELETE' });
+            // Get messages without the last assistant msg
+            const remaining = msgs.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+            renderMessages(remaining);
+            // Stream a new response
+            await streamResponse(remaining);
+        }
+
+        function showWelcome() {
+            document.getElementById('messages').innerHTML = `
+                <div class="welcome">
+                    <h2>Hi ${escapeHtml(username)}!</h2>
+                    <p>Start a conversation with Ollama, or organize chats into projects</p>
+                    <div class="suggestions">
+                        <div class="suggestion" onclick="sendSuggestion('Explain quantum computing in simple terms')">
+                            <div class="label">Explain a concept</div><div class="desc">Explain quantum computing in simple terms</div></div>
+                        <div class="suggestion" onclick="sendSuggestion('Write a Python function to sort a list of dictionaries by a given key')">
+                            <div class="label">Write code</div><div class="desc">Python function to sort a list of dicts</div></div>
+                        <div class="suggestion" onclick="sendSuggestion('Give me 5 creative ideas for a weekend project')">
+                            <div class="label">Brainstorm ideas</div><div class="desc">5 creative weekend project ideas</div></div>
+                        <div class="suggestion" onclick="sendSuggestion('What are the key differences between Rust and Go?')">
+                            <div class="label">Compare things</div><div class="desc">Key differences between Rust and Go</div></div>
+                    </div>
+                </div>`;
+            document.getElementById('chatTitle').textContent = 'New Chat';
+            document.getElementById('exportBtn').style.display = 'none';
+            updateProjectBadge();
+        }
+
+        // ---------- Project View ----------
+        async function showProject(pid) {
+            const p = projects.find(x => x.id === pid); if (!p) return;
+            const [chatsResp, filesResp] = await Promise.all([
+                api(`/api/chats?project_id=${pid}`).then(r => r.json()),
+                api(`/api/files/${pid}`).then(r => r.json())
+            ]);
+            const pChats = chatsResp.chats || [];
+            const files = filesResp.files || [];
+            const container = document.getElementById('messages');
+            document.getElementById('chatTitle').textContent = p.name;
+            currentChatId = null; currentProjectId = pid;
+            updateProjectBadge(p);
+            let agentHtml = '';
+            if (p.agent_name || p.agent_prompt) {
+                agentHtml = `<div class="project-section">
+                    <h3>🤖 Agent Profile</h3>
+                    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;">
+                        ${p.agent_name ? `<div style="font-weight:600;margin-bottom:8px;">${escapeHtml(p.agent_name)}</div>` : ''}
+                        ${p.agent_prompt ? `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">${escapeHtml(p.agent_prompt)}</div>` : ''}
+                        ${p.agent_model ? `<div class="agent-badge">Model: ${escapeHtml(p.agent_model)}</div>` : ''}
+                        <button class="modal-btn secondary" style="margin-top:8px;" onclick="editProject('${p.id}')">Edit Agent</button>
+                    </div>
+                </div>`;
+            }
+            container.innerHTML = `
+                <div class="project-view">
+                    <div class="project-header">
+                        <div class="project-color-dot" style="background:${p.color}"></div>
+                        <h2>${escapeHtml(p.name)}</h2>
+                        ${p.description ? `<span class="desc">${escapeHtml(p.description)}</span>` : ''}
+                    </div>
+                    ${agentHtml}
+                    <div class="project-section">
+                        <h3>Files (${files.length})</h3>
+                        <div class="file-grid">
+                            ${files.map(f => `
+                                <div class="file-card" style="cursor:pointer;" onclick="viewFile('${f.id}')">
+                                    <div class="file-icon">📄</div>
+                                    <div class="file-info">
+                                        <div class="file-name">${escapeHtml(f.filename)}</div>
+                                        <div class="file-size">${formatSize(f.filesize)}</div>
+                                    </div>
+                                    <span class="file-delete" onclick="event.stopPropagation();deleteFile('${f.id}','${pid}')">✕</span>
+                                </div>`).join('')}
+                            <div class="file-card" style="cursor:pointer;border-style:dashed;" onclick="uploadFile('${pid}')">
+                                <div class="file-icon">+</div><div class="file-info"><div class="file-name">Upload file</div></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="project-section">
+                        <h3>Chats (${pChats.length})</h3>
+                        <div class="chat-grid">
+                            <div class="chat-card" style="border-style:dashed;" onclick="newChatInProject('${pid}')">
+                                <div class="cc-title">+ New chat in this project</div></div>
+                            ${pChats.map(c => `
+                                <div class="chat-card" onclick="selectChat('${c.id}')">
+                                    <div class="cc-title">${escapeHtml(c.title)}
+                                        <span class="cc-delete" onclick="event.stopPropagation();deleteChat('${c.id}')">✕</span></div>
+                                    <div class="cc-meta">${formatDate(c.updated)}</div>
+                                </div>`).join('')}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        // ---------- Compare Mode ----------
+        function toggleCompare() {
+            compareMode = !compareMode;
+            document.getElementById('compareBtn').style.color = compareMode ? 'var(--accent)' : '';
+            document.getElementById('compareBtn').style.borderColor = compareMode ? 'var(--accent)' : '';
+            if (compareMode) {
+                document.getElementById('messages').innerHTML = `
+                    <div class="compare-wrapper">
+                        <div class="compare-panel">
+                            <div class="panel-header">Model A: <select id="compareModelA"></select></div>
+                            <div class="content" id="compareResultA"><div style="color:var(--text-dim);font-size:13px;">Send a message to compare...</div></div>
+                        </div>
+                        <div class="compare-panel">
+                            <div class="panel-header">Model B: <select id="compareModelB"></select></div>
+                            <div class="content" id="compareResultB"><div style="color:var(--text-dim);font-size:13px;">Send a message to compare...</div></div>
+                        </div>
+                    </div>`;
+                const selA = document.getElementById('compareModelA');
+                const selB = document.getElementById('compareModelB');
+                allModelsList.forEach(m => {
+                    const name = typeof m === 'string' ? m : m.name;
+                    selA.appendChild(new Option(name, name));
+                    selB.appendChild(new Option(name, name));
+                });
+                if (currentModel) { selA.value = currentModel; selB.value = currentModel; }
+                const opts = allModelsList.length > 1 ? [allModelsList[1]] : [];
+                if (opts.length) selB.value = typeof opts[0] === 'string' ? opts[0] : opts[0].name;
+            } else {
+                if (currentChatId) selectChat(currentChatId); else showWelcome();
+            }
+        }
+
+        // ---------- Chat actions ----------
+        async function newChat() { const id = await createChat(null); await selectChat(id); renderSidebar(); document.getElementById('input').focus(); }
+        async function newChatInProject(pid) { const id = await createChat(pid); await selectChat(id); renderSidebar(); document.getElementById('input').focus(); }
+        function sendSuggestion(text) { document.getElementById('input').value = text; sendMessage(); }
+        function handleKeyDown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+        function autoResize(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; }
+
+        async function sendMessage() {
+            if (isStreaming || !userId) return;
+            const input = document.getElementById('input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            if (compareMode) {
+                await sendCompareMessage(text);
+                input.value = ''; input.style.height = 'auto';
+                return;
+            }
+
+            if (!currentChatId) { const id = await createChat(null, text.substring(0, 40)); currentChatId = id; await loadChats(); }
+            const chatId = currentChatId;
+            await api(`/api/chats/${chatId}/messages`, { method: 'POST', body: JSON.stringify({ role: 'user', content: text }) });
+            const chat = chats.find(c => c.id === chatId);
+            if (chat && chat.title === 'New Chat') {
+                const title = text.substring(0, 40) + (text.length > 40 ? '...' : '');
+                await api(`/api/chats/${chatId}`, { method: 'PUT', body: JSON.stringify({ title }) });
+                document.getElementById('chatTitle').textContent = title;
+                await loadChats();
+            }
+            input.value = ''; input.style.height = 'auto';
+            const chatResp = await api(`/api/chats/${chatId}`);
+            const chatData = await chatResp.json();
+            const messages = chatData.messages.map(m => ({ role: m.role, content: m.content }));
+            renderMessages(messages);
+            await streamResponse(messages, chatId);
+        }
+
+        async function streamResponse(messages, chatId) {
+            const container = document.getElementById('messages');
+            const assistantDiv = createMessageElement('assistant', '');
+            const contentDiv = assistantDiv.querySelector('.content');
+            contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            container.appendChild(assistantDiv);
+            container.scrollTop = container.scrollHeight;
+            isStreaming = true;
+            document.getElementById('sendBtn').disabled = true;
+            let fullResponse = '';
+            try {
+                const resp = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type':'application/json','X-User-Id':userId},
+                    body: JSON.stringify({ model: currentModel, messages, project_id: currentProjectId }) });
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n'); buffer = lines.pop();
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const jsonStr = line.slice(6).trim(); if (!jsonStr) continue;
+                            try {
+                                const chunk = JSON.parse(jsonStr);
+                                if (chunk.error) { fullResponse = `Error: ${chunk.error}`; break; }
+                                if (chunk.type === 'tool_call') {
+                                    let toolDiv = contentDiv.querySelector('.tool-indicator');
+                                    if (!toolDiv) { toolDiv = document.createElement('div'); toolDiv.className = 'tool-indicator'; contentDiv.appendChild(toolDiv); }
+                                    toolDiv.innerHTML = `<div class="tool-active">🔍 Searching: "${chunk.args.query || JSON.stringify(chunk.args)}"</div>`;
+                                    container.scrollTop = container.scrollHeight;
+                                } else if (chunk.type === 'tool_result') {
+                                    let toolDiv = contentDiv.querySelector('.tool-indicator');
+                                    if (!toolDiv) { toolDiv = document.createElement('div'); toolDiv.className = 'tool-indicator'; contentDiv.appendChild(toolDiv); }
+                                    toolDiv.innerHTML = `<div class="tool-done">✅ Web search complete</div><div class="tool-preview">${escapeHtml(chunk.result.substring(0, 200))}</div>`;
+                                    container.scrollTop = container.scrollHeight;
+                                } else if (chunk.message && chunk.message.content) {
+                                    fullResponse += chunk.message.content;
+                                    contentDiv.innerHTML = marked.parse(fullResponse);
+                                    container.scrollTop = container.scrollHeight;
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                }
+                addCopyButtonsToCodeBlocks(container);
+                if (chatId && fullResponse) {
+                    await api(`/api/chats/${chatId}/messages`, { method: 'POST', body: JSON.stringify({ role: 'assistant', content: fullResponse }) });
+                    await loadChats(); renderSidebar();
+                }
+            } catch (e) { contentDiv.textContent = `Error: ${e.message}`; }
+            finally { isStreaming = false; document.getElementById('sendBtn').disabled = false; document.getElementById('input').focus(); }
+        }
+
+        async function sendCompareMessage(text) {
+            const messages = [{ role: 'user', content: text }];
+            const modelA = document.getElementById('compareModelA').value;
+            const modelB = document.getElementById('compareModelB').value;
+            const resultA = document.getElementById('compareResultA');
+            const resultB = document.getElementById('compareResultB');
+            resultA.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            resultB.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            isStreaming = true; document.getElementById('sendBtn').disabled = true;
+            // Stream both in parallel
+            const streamOne = async (model, resultEl) => {
+                let full = '';
+                try {
+                    const resp = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type':'application/json','X-User-Id':userId},
+                        body: JSON.stringify({ model, messages, project_id: currentProjectId }) });
+                    const reader = resp.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n'); buffer = lines.pop();
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const jsonStr = line.slice(6).trim(); if (!jsonStr) continue;
+                                try {
+                                    const chunk = JSON.parse(jsonStr);
+                                    if (chunk.error) { full = `Error: ${chunk.error}`; break; }
+                                    if (chunk.message && chunk.message.content) {
+                                        full += chunk.message.content;
+                                        resultEl.innerHTML = marked.parse(full);
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                    addCopyButtonsToCodeBlocks(resultEl);
+                } catch (e) { resultEl.textContent = `Error: ${e.message}`; }
+            };
+            await Promise.all([streamOne(modelA, resultA), streamOne(modelB, resultB)]);
+            isStreaming = false; document.getElementById('sendBtn').disabled = false;
+        }
+
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
+        function updateProjectBadge(p) {
+            const badge = document.getElementById('projectBadge');
+            if (p || currentProjectId) {
+                const proj = p || projects.find(x => x.id === currentProjectId);
+                if (proj) { badge.textContent = proj.name; badge.style.display = 'inline-block'; return; }
+            }
+            badge.style.display = 'none';
+        }
+
+        // ---------- Project Modal ----------
+        function renderColorPicker() {
+            document.getElementById('colorPicker').innerHTML = colors.map(c =>
+                `<div class="color-dot ${c === selectedColor ? 'selected' : ''}" style="background:${c}" onclick="selectColor('${c}')"></div>`).join('');
+        }
+        function selectColor(c) { selectedColor = c; renderColorPicker(); }
+        function openNewProjectModal() {
+            editingProjectId = null;
+            selectedColor = '#7c4dff';
+            document.getElementById('modalTitle').textContent = 'New Project';
+            document.getElementById('projectName').value = '';
+            document.getElementById('projectDesc').value = '';
+            document.getElementById('agentName').value = '';
+            document.getElementById('agentPrompt').value = '';
+            document.getElementById('agentModel').value = '';
+            document.getElementById('saveProjectBtn').textContent = 'Create';
+            renderColorPicker();
+            document.getElementById('projectModal').style.display = 'flex';
+        }
+        function closeModal() { document.getElementById('projectModal').style.display = 'none'; }
+        async function saveProject() {
+            const name = document.getElementById('projectName').value.trim(); if (!name) return;
+            const desc = document.getElementById('projectDesc').value.trim();
+            const agentName = document.getElementById('agentName').value.trim();
+            const agentPrompt = document.getElementById('agentPrompt').value.trim();
+            const agentModel = document.getElementById('agentModel').value;
+            const agent = { name: agentName, prompt: agentPrompt, model: agentModel };
+            if (editingProjectId) {
+                await updateProject(editingProjectId, { name, description: desc, color: selectedColor, agent_name: agentName, agent_prompt: agentPrompt, agent_model: agentModel });
+            } else {
+                await createProject(name, desc, selectedColor, agent);
+            }
+            closeModal();
+            await loadProjects(); renderSidebar();
+        }
+
+        // ---------- Settings ----------
+        async function showSettings() {
+            try {
+                const resp = await api('/api/settings');
+                const data = await resp.json();
+                document.getElementById('settingsOllamaUrl').value = data.ollama_url || '';
+                document.getElementById('settingsSearxngUrl').value = data.searxng_url || '';
+                // Populate default model select
+                const sel = document.getElementById('settingsDefaultModel');
+                sel.innerHTML = '<option value="">Use server default</option>';
+                allModelsList.forEach(m => {
+                    const name = typeof m === 'string' ? m : m.name;
+                    sel.appendChild(new Option(name, name));
+                });
+                sel.value = data.default_model || '';
+                document.getElementById('ollamaTestResult').innerHTML = '';
+                document.getElementById('searxngTestResult').innerHTML = '';
+                document.getElementById('settingsModal').style.display = 'flex';
+            } catch (e) { alert('Failed to load settings'); }
+        }
+        function closeSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+        async function saveSettings() {
+            const ollamaUrl = document.getElementById('settingsOllamaUrl').value.trim();
+            const searxngUrl = document.getElementById('settingsSearxngUrl').value.trim();
+            const defaultModel = document.getElementById('settingsDefaultModel').value;
+            await api('/api/settings', { method: 'PUT', body: JSON.stringify({
+                ollama_url: ollamaUrl, searxng_url: searxngUrl, default_model: defaultModel
+            }) });
+            closeSettings();
+            await loadModels();
+            updateStatusText();
+        }
+        async function testOllamaConnection() {
+            const el = document.getElementById('ollamaTestResult');
+            el.innerHTML = '<span style="color:var(--text-muted)">Testing...</span>';
+            try {
+                // Save current value first so the test uses it
+                const ollamaUrl = document.getElementById('settingsOllamaUrl').value.trim();
+                await api('/api/settings', { method: 'PUT', body: JSON.stringify({ ollama_url: ollamaUrl }) });
+                const resp = await api('/api/settings/test-ollama');
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    el.innerHTML = `<span style="color:var(--green)">✓ Connected — ${data.model_count} models found</span>`;
+                } else {
+                    el.innerHTML = `<span style="color:var(--red)">✗ ${data.error || 'Failed'}</span>`;
+                }
+            } catch (e) { el.innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`; }
+        }
+        async function testSearxngConnection() {
+            const el = document.getElementById('searxngTestResult');
+            el.innerHTML = '<span style="color:var(--text-muted)">Testing...</span>';
+            try {
+                const searxngUrl = document.getElementById('settingsSearxngUrl').value.trim();
+                await api('/api/settings', { method: 'PUT', body: JSON.stringify({ searxng_url: searxngUrl }) });
+                const resp = await api('/api/settings/test-searxng');
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    el.innerHTML = `<span style="color:var(--green)">✓ Connected — search returned ${data.result_count} results</span>`;
+                } else {
+                    el.innerHTML = `<span style="color:var(--red)">✗ ${data.error || 'Failed'}</span>`;
+                }
+            } catch (e) { el.innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`; }
+        }
+
+        // ---------- Utils ----------
+        function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+        function formatDate(ts) { const d = new Date(ts * 1000); const now = new Date();
+            if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+            return d.toLocaleDateString([], {month:'short',day:'numeric'}); }
+        function formatSize(b) { if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+    </script>
+</body>
+</html>

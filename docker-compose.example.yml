@@ -1,0 +1,18 @@
+services:
+  ollama-chat:
+    build: .
+    container_name: ollama-chat
+    ports:
+      - "3011:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - DEFAULT_MODEL=llama3.2
+      - DATA_DIR=/app/data
+      - UPLOAD_DIR=/app/uploads
+      - SEARXNG_URL=http://host.docker.internal:9090
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    restart: unless-stopped
