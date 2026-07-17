@@ -294,8 +294,17 @@ def get_project_context(project_id: str, max_chars: int = 8000) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Routes: Pages
+# Routes: Setup check & Pages
 # ---------------------------------------------------------------------------
+
+@app.get("/api/setup-status")
+async def setup_status():
+    """Check if initial setup is needed (no users exist yet)."""
+    db = get_db()
+    count = db.execute("SELECT count(*) FROM users").fetchone()[0]
+    db.close()
+    return {"setup_needed": count == 0, "user_count": count}
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -439,28 +448,34 @@ async def totp_disable(request: Request):
 
 @app.get("/api/admin/users")
 async def list_users(request: Request):
-    """List all users. Any logged-in user can view."""
-    user = require_user(request)
+    """List all users. Admin only."""
+    admin = require_admin(request)
     db = get_db()
-    users = db.execute("SELECT id, username, role, theme, created FROM users ORDER BY created").fetchall()
+    users = db.execute("SELECT id, username, role, theme, totp_enabled, created FROM users ORDER BY created").fetchall()
     db.close()
     return [dict(u) for u in users]
 
 
 @app.post("/api/admin/set-role")
 async def set_role(request: Request):
-    """Set a user's role (admin or user). Any logged-in user can do this."""
-    user = require_user(request)
+    """Set a user's role (admin or user). Admin only."""
+    admin = require_admin(request)
     body = await request.json()
     target_id = body.get("user_id", "")
     new_role = body.get("role", "user")
     if new_role not in ("admin", "user"):
         return JSONResponse({"error": "Role must be 'admin' or 'user'"}, status_code=400)
     db = get_db()
-    user = db.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone()
-    if not user:
+    target = db.execute("SELECT id, role FROM users WHERE id=?", (target_id,)).fetchone()
+    if not target:
         db.close()
         return JSONResponse({"error": "User not found"}, status_code=404)
+    # Prevent demoting the last admin
+    if dict(target)["role"] == "admin" and new_role == "user":
+        admin_count = db.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0]
+        if admin_count <= 1:
+            db.close()
+            return JSONResponse({"error": "Cannot demote the last admin"}, status_code=400)
     db.execute("UPDATE users SET role=? WHERE id=?", (new_role, target_id))
     db.commit()
     db.close()
@@ -469,12 +484,19 @@ async def set_role(request: Request):
 
 @app.delete("/api/admin/users/{uid}")
 async def delete_user(uid: str, request: Request):
-    """Delete a user and all their data. Cannot delete yourself."""
-    user = require_user(request)
-    if uid == user["id"]:
+    """Delete a user and all their data. Admin only. Cannot delete yourself."""
+    admin = require_admin(request)
+    if uid == admin["id"]:
         return JSONResponse({"error": "Cannot delete your own account"}, status_code=400)
     db = get_db()
-    #CASCADE will handle chats, messages, projects, files
+    # Prevent deleting the last admin
+    target = db.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
+    if target and dict(target)["role"] == "admin":
+        admin_count = db.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0]
+        if admin_count <= 1:
+            db.close()
+            return JSONResponse({"error": "Cannot delete the last admin"}, status_code=400)
+    # CASCADE will handle chats, messages, projects, files
     db.execute("DELETE FROM users WHERE id=?", (uid,))
     db.commit()
     db.close()
@@ -483,8 +505,8 @@ async def delete_user(uid: str, request: Request):
 
 @app.post("/api/admin/create-user")
 async def admin_create_user(request: Request):
-    """Create a new user with username, password, and role."""
-    user = require_user(request)
+    """Create a new user with username, password, and role. Admin only."""
+    admin = require_admin(request)
     body = await request.json()
     username = body.get("username", "").strip()
     password = body.get("password", "")
@@ -497,8 +519,8 @@ async def admin_create_user(request: Request):
 
 @app.post("/api/admin/reset-password")
 async def admin_reset_password(request: Request):
-    """Reset a user's password."""
-    user = require_user(request)
+    """Reset a user's password. Admin only."""
+    admin = require_admin(request)
     body = await request.json()
     target_id = body.get("user_id", "")
     new_password = body.get("new_password", "")
@@ -507,8 +529,8 @@ async def admin_reset_password(request: Request):
     if len(new_password) < 4:
         return JSONResponse({"error": "Password must be at least 4 characters"}, status_code=400)
     db = get_db()
-    user = db.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone()
-    if not user:
+    target = db.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone()
+    if not target:
         db.close()
         return JSONResponse({"error": "User not found"}, status_code=404)
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()

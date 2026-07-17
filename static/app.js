@@ -45,6 +45,15 @@ const colors = ['#7c4dff', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#e91e63'
  * If so, auto-login. Otherwise show the login screen.
  */
 window.onload = async () => {
+    // Check if initial setup is needed (no users yet)
+    try {
+        const setupResp = await fetch('/api/setup-status');
+        const setupData = await setupResp.json();
+        if (setupData.setup_needed) {
+            showSetupWizard();
+            return;
+        }
+    } catch (e) { /* proceed to normal login */ }
     const saved = localStorage.getItem('ollama-chat-user');
     if (saved) {
         try {
@@ -59,6 +68,69 @@ function showLogin() {
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('mainApp').style.display = 'none';
     document.getElementById('loginInput').focus();
+}
+
+/** Show setup wizard for first-run (no users exist yet). */
+function showSetupWizard() {
+    const el = document.getElementById('loginScreen');
+    el.style.display = 'flex';
+    document.getElementById('mainApp').style.display = 'none';
+    const card = el.querySelector('.login-card');
+    card.innerHTML = `
+        <h1>◆ Welcome to Ollama Chat</h1>
+        <p>Create the admin account to get started</p>
+        <input type="text" id="setupUsername" placeholder="Admin username" maxlength="30"
+            onkeydown="if(event.key==='Enter')document.getElementById('setupPassword').focus()" />
+        <input type="password" id="setupPassword" placeholder="Password (min 4 chars)"
+            onkeydown="if(event.key==='Enter')document.getElementById('setupConfirm').focus()" />
+        <input type="password" id="setupConfirm" placeholder="Confirm password"
+            onkeydown="if(event.key==='Enter')doSetup()" />
+        <button onclick="doSetup()">Create Admin Account →</button>
+        <div class="login-error" id="setupError"></div>
+    `;
+}
+
+async function doSetup() {
+    const username = document.getElementById('setupUsername').value.trim();
+    const password = document.getElementById('setupPassword').value;
+    const confirm = document.getElementById('setupConfirm').value;
+    const errEl = document.getElementById('setupError');
+    errEl.textContent = '';
+    if (!username) { errEl.textContent = 'Please enter a username'; return; }
+    if (!password) { errEl.textContent = 'Please enter a password'; return; }
+    if (password.length < 4) { errEl.textContent = 'Password must be at least 4 characters'; return; }
+    if (password !== confirm) { errEl.textContent = 'Passwords do not match'; return; }
+    try {
+        const resp = await fetch('/api/login', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ username, password })
+        });
+        const data = await resp.json();
+        if (data.error) { errEl.textContent = data.error; return; }
+        localStorage.setItem('ollama-chat-user', JSON.stringify(data));
+        await loginWithId(data.user_id);
+        // Restore normal login card for future logins
+        restoreLoginCard();
+    } catch (e) { errEl.textContent = 'Connection error'; }
+}
+
+function restoreLoginCard() {
+    const el = document.getElementById('loginScreen');
+    const card = el.querySelector('.login-card');
+    card.innerHTML = `
+        <h1>◆ Ollama Chat</h1>
+        <p>Sign in or create an account</p>
+        <input type="text" id="loginInput" placeholder="Username" maxlength="30"
+            onkeydown="if(event.key==='Enter')document.getElementById('loginPassword').focus()" />
+        <input type="password" id="loginPassword" placeholder="Password"
+            onkeydown="if(event.key==='Enter'){const t=document.getElementById('totpCode');if(t&&t.style.display!=='none')t.focus();else doLogin();}" />
+        <input type="text" id="totpCode" placeholder="6-digit authenticator code"
+            style="display:none;"
+            onkeydown="if(event.key==='Enter')doLogin()" 
+            maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" />
+        <button id="loginBtn" onclick="doLogin()">Continue →</button>
+        <div class="login-error" id="loginError"></div>
+    `;
 }
 
 /** Hide the login screen and show the main app.
@@ -1256,9 +1328,9 @@ async function showSettings() {
         // Clear test results
         document.getElementById('ollamaTestResult').innerHTML = '';
         document.getElementById('searxngTestResult').innerHTML = '';
-        // Show manage users section for all logged-in users
+        // Show/hide admin section based on role
         const usersSection = document.getElementById('manageUsersSection');
-        if (usersSection) usersSection.style.display = 'block';
+        if (usersSection) usersSection.style.display = userRole === 'admin' ? 'block' : 'none';
         document.getElementById('settingsModal').style.display = 'flex';
         loadTotpStatus();
     } catch (e) { alert('Failed to load settings'); }
@@ -1413,7 +1485,7 @@ async function disableTotp() {
  * Admin panel — list users, change roles, create users, reset passwords, delete users.
  */
 async function showAdminPanel() {
-    if (!userId) { alert('Please log in first'); return; }
+    if (userRole !== 'admin') { alert('Admin access required'); return; }
     document.getElementById('settingsModal').style.display = 'none';
     const modal = document.getElementById('adminModal');
     const list = document.getElementById('adminUserList');
@@ -1425,14 +1497,17 @@ async function showAdminPanel() {
         list.innerHTML = '';
         users.forEach(u => {
             const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);';
+            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;';
             const roleBadge = u.role === 'admin'
                 ? '<span style="background:var(--accent);color:white;padding:2px 8px;border-radius:4px;font-size:11px;">admin</span>'
                 : '<span style="background:var(--bg-input);color:var(--text-muted);padding:2px 8px;border-radius:4px;font-size:11px;">user</span>';
+            const totpBadge = u.totp_enabled
+                ? '<span style="background:#2e7d32;color:white;padding:2px 8px;border-radius:4px;font-size:11px;">🔐 2FA</span>'
+                : '';
             row.innerHTML = `
-                <span style="flex:1;font-size:14px;color:var(--text);">${u.username}</span>
-                ${roleBadge}
-                <select onchange="setUserRole('${u.id}', this.value)" style="font-size:12px;padding:4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+                <span style="flex:1;font-size:14px;color:var(--text);min-width:80px;">${u.username}</span>
+                ${roleBadge} ${totpBadge}
+                <select onchange="setUserRole('${u.id}', this.value)" style="font-size:12px;padding:4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;${u.id===userId?'opacity:0.5;pointer-events:none;':''}">
                     <option value="user" ${u.role!=='admin'?'selected':''}>user</option>
                     <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
                 </select>
