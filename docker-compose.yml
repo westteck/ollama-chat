@@ -1,0 +1,13 @@
+services:
+  ollama-chat:
+    build: .
+    container_name: ollama-chat
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - DEFAULT_MODEL=llama3.2
+    restart: unless-stopped

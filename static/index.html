@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Ollama Chat</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-card">
+            <h1>◆ Ollama Chat</h1>
+            <p>Sign in or create an account</p>
+            <input type="text" id="loginInput" placeholder="Username" maxlength="30"
+                onkeydown="if(event.key==='Enter')document.getElementById('loginPassword').focus()" />
+            <input type="password" id="loginPassword" placeholder="Password"
+                onkeydown="if(event.key==='Enter'){const t=document.getElementById('totpCode');if(t&&t.style.display!=='none')t.focus();else doLogin();}" />
+            <input type="text" id="totpCode" placeholder="6-digit authenticator code"
+                style="display:none;"
+                onkeydown="if(event.key==='Enter')doLogin()" 
+                maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" />
+            <button id="loginBtn" onclick="doLogin()">Continue →</button>
+            <div class="login-error" id="loginError"></div>
+        </div>
+    </div>
+
+    <!-- Main App (hidden until login) -->
+    <div class="app" id="mainApp" style="display:none;">
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header"><h1>Ollama Chat</h1></div>
+            <div class="sidebar-tabs">
+                <div class="sidebar-tab active" data-tab="chats" onclick="switchTab('chats')">Chats</div>
+                <div class="sidebar-tab" data-tab="projects" onclick="switchTab('projects')">Projects</div>
+                <div class="sidebar-tab" data-tab="search" onclick="switchTab('search')">Search</div>
+            </div>
+            <div class="search-bar" id="searchBar" style="display:none;">
+                <input type="text" id="searchInput" placeholder="Search messages..." oninput="doSearch()" />
+            </div>
+            <div class="sidebar-content" id="sidebarContent"></div>
+            <div class="sidebar-footer">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select class="model-select" id="modelSelect" onchange="changeModel()" style="flex:1;">
+                        <option value="">Loading models...</option>
+                    </select>
+                    <button class="model-settings-btn" onclick="openModelSettings()" title="Manage models" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-muted);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;flex-shrink:0;">⚙</button>
+                </div>
+            </div>
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar">U</div>
+                <span id="userNameDisplay">User</span>
+                <span class="logout-btn" onclick="doLogout()" title="Switch user">⏻</span>
+            </div>
+        </div>
+        <div class="main">
+            <div class="main-header">
+                <button class="toggle-sidebar" onclick="toggleSidebar()">☰</button>
+                <span class="title" id="chatTitle">New Chat</span>
+                <span class="project-badge" id="projectBadge" style="display:none;"></span>
+                <span class="status-text" id="statusText"></span>
+                <button class="header-btn" id="compareBtn" onclick="toggleCompare()" title="Compare two models">⇄</button>
+                <button class="header-btn" id="exportBtn" onclick="exportChat()" title="Export chat" style="display:none;">⬇</button>
+                <button class="header-btn" onclick="showSettings()" title="Settings">⚙</button>
+                <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
+            </div>
+            <div class="messages" id="messages"></div>
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <textarea id="input" placeholder="Send a message... (Shift+Enter for newline)" rows="1"
+                        onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Modal -->
+    <div class="modal-overlay" id="projectModal" style="display:none;">
+        <div class="modal" style="max-width:560px;">
+            <h3 id="modalTitle">New Project</h3>
+            <label>Project Name</label>
+            <input type="text" id="projectName" placeholder="My Project" />
+            <label>Description (optional)</label>
+            <textarea id="projectDesc" rows="2" placeholder="What is this project about?"></textarea>
+            <label>Color</label>
+            <div class="color-picker" id="colorPicker"></div>
+
+            <!-- Agent Profile Section -->
+            <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Agent Profile (optional)</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Set a custom AI personality, system prompt, and preferred model for this project.</p>
+                <label>Agent Name</label>
+                <input type="text" id="agentName" placeholder="e.g. Python Expert, Creative Writer..." />
+                <label>System Prompt</label>
+                <textarea id="agentPrompt" rows="3" placeholder="You are an expert Python developer who writes clean, well-documented code..."></textarea>
+                <label>Preferred Model (overrides dropdown)</label>
+                <select id="agentModel"><option value="">Use dropdown model</option></select>
+            </div>
+
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeModal()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveProject()" id="saveProjectBtn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Settings Modal -->
+    <div class="modal-overlay" id="modelSettingsModal" style="display:none;">
+        <div class="modal" style="max-width:420px;">
+            <h3>Manage Models</h3>
+            <p style="color:var(--text-muted);font-size:13px;margin:0 0 12px 0;">Uncheck models to hide them from your dropdown.</p>
+            <div id="modelSettingsList" style="max-height:300px;overflow-y:auto;margin-bottom:16px;"></div>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeModelSettings()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveModelSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Viewer Modal -->
+    <div class="modal-overlay" id="fileViewerModal" style="display:none;">
+        <div class="modal" style="max-width:700px;">
+            <h3 id="fileViewerTitle">File</h3>
+            <div class="file-viewer-content" id="fileViewerContent"></div>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="document.getElementById('fileViewerModal').style.display='none'">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal" style="display:none;">
+        <div class="modal" style="max-width:520px;">
+            <h3>⚙ Settings</h3>
+
+            <!-- Connection Settings -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Ollama Connection</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">URL of your Ollama instance. Leave blank to use the default from docker-compose.</p>
+                <label>Ollama URL</label>
+                <input type="text" id="settingsOllamaUrl" placeholder="http://host.docker.internal:11434" />
+                <div id="ollamaTestResult" style="font-size:13px;margin-bottom:12px;"></div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="modal-btn secondary" onclick="testOllamaConnection()">Test Connection</button>
+                </div>
+            </div>
+
+            <!-- SearXNG Settings -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">SearXNG Search (optional)</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">URL of your SearXNG instance for web search tool. Leave blank to use the default.</p>
+                <label>SearXNG URL</label>
+                <input type="text" id="settingsSearxngUrl" placeholder="http://host.docker.internal:9090" />
+                <div id="searxngTestResult" style="font-size:13px;margin-bottom:12px;"></div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="modal-btn secondary" onclick="testSearxngConnection()">Test Connection</button>
+                </div>
+            </div>
+
+            <!-- Default Model -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Default Model</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Model selected by default when starting a new chat. Leave blank to use the default from docker-compose.</p>
+                <label>Default Model</label>
+                <select id="settingsDefaultModel"><option value="">Use server default</option></select>
+            </div>
+
+            <!-- Change Password -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Change Password</label>
+                <input type="password" id="oldPassword" placeholder="Current password" />
+                <input type="password" id="newPassword" placeholder="New password" />
+                <input type="password" id="confirmPassword" placeholder="Confirm new password" />
+                <div id="changePasswordResult" style="font-size:13px;margin-bottom:8px;"></div>
+                <button class="modal-btn secondary" onclick="changePassword()">Change Password</button>
+            </div>
+
+            <!-- Two-Factor Authentication (TOTP) -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">🔐 Two-Factor Authentication</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Add an extra layer of security with an authenticator app (Google Authenticator, Authy, Aegis, etc.).</p>
+                <div id="totpStatus" style="font-size:13px;margin-bottom:8px;"></div>
+                <div id="totpSetup" style="display:none;">
+                    <p style="font-size:13px;color:var(--text);font-weight:600;">Step 1: Scan this QR code with your authenticator app</p>
+                    <div id="totpQrContainer" style="text-align:center;margin:12px 0;"></div>
+                    <p style="font-size:12px;color:var(--text-muted);">Or enter this secret manually: <code id="totpSecretDisplay" style="background:var(--bg-input);padding:2px 6px;border-radius:4px;font-size:13px;"></code></p>
+                    <p style="font-size:13px;color:var(--text);font-weight:600;margin-top:16px;">Step 2: Enter the 6-digit code to verify</p>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+                        <input type="text" id="totpVerifyCode" placeholder="000000" maxlength="6" inputmode="numeric" pattern="[0-9]*" style="width:140px;padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;" />
+                        <button class="modal-btn primary" onclick="verifyTotp()">Verify & Enable</button>
+                        <button class="modal-btn secondary" onclick="cancelTotpSetup()">Cancel</button>
+                    </div>
+                    <div id="totpVerifyResult" style="font-size:13px;margin-top:4px;"></div>
+                </div>
+                <div id="totpActions" style="margin-top:8px;">
+                    <button class="modal-btn secondary" id="totpEnrollBtn" onclick="enrollTotp()">Enable 2FA</button>
+                    <button class="modal-btn secondary" id="totpDisableBtn" onclick="showDisableTotp()" style="display:none;background:#cc3333;color:white;">Disable 2FA</button>
+                </div>
+                <!-- Disable TOTP confirmation -->
+                <div id="totpDisableForm" style="display:none;margin-top:12px;">
+                    <p style="font-size:13px;color:var(--text);">Enter your password or current TOTP code to disable:</p>
+                    <input type="password" id="totpDisablePassword" placeholder="Password" style="width:100%;margin-top:8px;" />
+                    <p style="font-size:12px;color:var(--text-muted);text-align:center;">— or —</p>
+                    <input type="text" id="totpDisableCode" placeholder="6-digit code" maxlength="6" inputmode="numeric" style="width:140px;" />
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="modal-btn primary" style="background:#cc3333;" onclick="disableTotp()">Confirm Disable</button>
+                        <button class="modal-btn secondary" onclick="document.getElementById('totpDisableForm').style.display='none';">Cancel</button>
+                    </div>
+                    <div id="totpDisableResult" style="font-size:13px;margin-top:4px;"></div>
+                </div>
+            </div>
+
+            <!-- Model Visibility -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">Model Visibility</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Choose which models appear in your dropdown.</p>
+                <button class="modal-btn secondary" onclick="closeSettings();openModelSettings();">Manage Models</button>
+            </div>
+
+            <!-- Manage Users -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:16px;">
+                <label style="font-size:15px;font-weight:600;color:var(--text);">User Management</label>
+                <p style="font-size:12px;color:var(--text-muted);margin:4px 0 12px;">Add, edit, or remove users.</p>
+                <button onclick="closeSettings();showAdminPanel();" style="padding:10px 20px;background:#ff6600;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Manage Users</button>
+            </div>
+
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeSettings()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/app.js?v=6"></script>
+
+    <!-- Admin Modal -->
+    <div class="modal-overlay" id="adminModal" style="display:none;">
+        <div class="modal" style="max-width:560px;">
+            <h3>🛡 Admin Panel</h3>
+            <p style="color:var(--text-muted);font-size:13px;margin:0 0 12px 0;">Manage users, roles, and access.</p>
+
+            <!-- Create User -->
+            <div style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px;">
+                <label style="font-size:14px;font-weight:600;color:var(--text);">Create User</label>
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                    <input type="text" id="newUsername" placeholder="Username" style="flex:1;min-width:120px;padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;" />
+                    <input type="password" id="newUserPw" placeholder="Password" style="flex:1;min-width:120px;padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;" />
+                    <select id="newUserRole" style="padding:8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;">
+                        <option value="user">user</option>
+                        <option value="admin">admin</option>
+                    </select>
+                    <button class="modal-btn primary" onclick="adminCreateUser()" style="padding:8px 16px;">Create</button>
+                </div>
+                <div id="createUserResult" style="font-size:13px;margin-top:4px;"></div>
+            </div>
+
+            <!-- User List -->
+            <div id="adminUserList" style="max-height:350px;overflow-y:auto;"></div>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeAdminPanel()">Close</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
