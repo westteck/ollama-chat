@@ -3,6 +3,7 @@ Ollama Chat - Multi-user, projects, file context, searchable history.
 FastAPI backend with SQLite storage. Username + password auth.
 """
 import os
+import sys
 import json
 import sqlite3
 import hashlib
@@ -10,6 +11,7 @@ import time
 import uuid
 import bcrypt
 import pyotp
+import secrets
 from pathlib import Path
 from typing import Optional
 import httpx
@@ -117,8 +119,41 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
     CREATE INDEX IF NOT EXISTS idx_files_project ON files(project_id);
     CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+
+    CREATE TABLE IF NOT EXISTS invites (
+        id TEXT PRIMARY KEY,
+        token TEXT UNIQUE NOT NULL,
+        created_by TEXT NOT NULL,
+        used_by TEXT DEFAULT '',
+        used_at REAL DEFAULT 0,
+        created_at REAL NOT NULL,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+    );
     """)
     db.commit()
+    db.close()
+
+# Default admin credentials
+DEFAULT_ADMIN_USER = os.environ.get("DEFAULT_ADMIN_USER", "admin")
+DEFAULT_ADMIN_PASS = os.environ.get("DEFAULT_ADMIN_PASS", "admin123")
+
+
+def ensure_default_admin():
+    """Create the default admin account if no users exist."""
+    db = get_db()
+    count = db.execute("SELECT count(*) FROM users").fetchone()[0]
+    if count == 0:
+        uid = new_id()
+        pw_hash = bcrypt.hashpw(DEFAULT_ADMIN_PASS.encode(), bcrypt.gensalt()).decode()
+        try:
+            db.execute(
+                "INSERT INTO users (id, username, theme, role, password_hash, created) VALUES (?, ?, 'dark', 'admin', ?, ?)",
+                (uid, DEFAULT_ADMIN_USER, pw_hash, time.time())
+            )
+            db.commit()
+            print(f"[startup] Default admin created: {DEFAULT_ADMIN_USER}")
+        except sqlite3.IntegrityError:
+            pass  # Already exists — shouldn't happen but safe
     db.close()
 
 init_db()
@@ -158,6 +193,23 @@ def migrate_db():
     db.close()
 
 migrate_db()
+ensure_default_admin()
+
+# CLI: reset admin password to default
+if "--reset-admin" in sys.argv:
+    db = get_db()
+    user = db.execute("SELECT id FROM users WHERE username=?", (DEFAULT_ADMIN_USER,)).fetchone()
+    if user:
+        pw_hash = bcrypt.hashpw(DEFAULT_ADMIN_PASS.encode(), bcrypt.gensalt()).decode()
+        db.execute("UPDATE users SET password_hash=?, totp_enabled=0, totp_secret='' WHERE id=?", (pw_hash, user["id"]))
+        db.commit()
+        db.close()
+        print(f"Admin password reset to default for user '{DEFAULT_ADMIN_USER}'")
+        sys.exit(0)
+    else:
+        db.close()
+        print(f"User '{DEFAULT_ADMIN_USER}' not found")
+        sys.exit(1)
 
 def new_id():
     return uuid.uuid4().hex[:16]
@@ -187,8 +239,7 @@ def get_user_by_id(user_id: str) -> dict | None:
 
 
 def create_user(username: str, password: str, role: str = "user") -> dict:
-    """Create a new user with hashed password. Returns user dict.
-    First user automatically becomes admin."""
+    """Create a new user with hashed password. Returns user dict."""
     username = username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username required")
@@ -198,13 +249,9 @@ def create_user(username: str, password: str, role: str = "user") -> dict:
         raise HTTPException(status_code=400, detail="Username too long (max 30 chars)")
     if len(password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
-    # First user becomes admin
-    db = get_db()
-    user_count = db.execute("SELECT count(*) FROM users").fetchone()[0]
-    if user_count == 0:
-        role = "admin"
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     uid = new_id()
+    db = get_db()
     try:
         db.execute(
             "INSERT INTO users (id, username, theme, role, password_hash, created) VALUES (?, ?, 'dark', ?, ?, ?)",
@@ -318,11 +365,12 @@ async def index():
 
 @app.post("/api/login")
 async def login(request: Request):
-    """Login with username + password (+ TOTP code if enabled), or register if new user."""
+    """Login with username + password (+ TOTP if enabled). New users require an invite token."""
     body = await request.json()
     username = body.get("username", "").strip()
     password = body.get("password", "")
     totp_code = body.get("totp_code", "")
+    invite_token = body.get("invite_token", "")
     if not username:
         return JSONResponse({"error": "Username required"}, status_code=400)
     if not password:
@@ -355,8 +403,20 @@ async def login(request: Request):
 
         return {"user_id": existing["id"], "username": existing["username"], "theme": existing["theme"], "role": existing.get("role", "user"), "totp_enabled": bool(existing.get("totp_enabled"))}
     else:
-        # New user — register
+        # New user — require invite token
+        if not invite_token:
+            return JSONResponse({"error": "Invite token required", "invite_required": True}, status_code=403)
+        db = get_db()
+        invite = db.execute("SELECT * FROM invites WHERE token=? AND used_by='' AND used_at=0", (invite_token,)).fetchone()
+        if not invite:
+            db.close()
+            return JSONResponse({"error": "Invalid or already used invite token"}, status_code=403)
+        # Mark invite as used
+        now = time.time()
         user = create_user(username, password)
+        db.execute("UPDATE invites SET used_by=?, used_at=? WHERE id=?", (user["id"], now, invite["id"]))
+        db.commit()
+        db.close()
         return {"user_id": user["id"], "username": user["username"], "theme": user["theme"], "role": user.get("role", "user"), "totp_enabled": False}
 
 
@@ -446,6 +506,64 @@ async def totp_disable(request: Request):
     return {"ok": True, "totp_enabled": False}
 
 
+# ---------------------------------------------------------------------------
+# Routes: Invite tokens (admin only)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/admin/invites")
+async def create_invite(request: Request):
+    """Generate a new invite token. Admin only."""
+    admin = require_admin(request)
+    token = secrets.token_urlsafe(24)
+    iid = new_id()
+    db = get_db()
+    db.execute("INSERT INTO invites (id, token, created_by, created_at) VALUES (?, ?, ?, ?)",
+               (iid, token, admin["id"], time.time()))
+    db.commit()
+    db.close()
+    return {"id": iid, "token": token, "created_by": admin["id"], "created_at": time.time()}
+
+
+@app.get("/api/admin/invites")
+async def list_invites(request: Request):
+    """List all invite tokens. Admin only."""
+    admin = require_admin(request)
+    db = get_db()
+    rows = db.execute("""
+        SELECT i.id, i.token, i.created_by, i.used_by, i.used_at, i.created_at,
+               u1.username as created_by_name,
+               u2.username as used_by_name
+        FROM invites i
+        LEFT JOIN users u1 ON i.created_by = u1.id
+        LEFT JOIN users u2 ON i.used_by = u2.id
+        ORDER BY i.created_at DESC
+    """).fetchall()
+    db.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["used"] = bool(d["used_by"])
+        d["created_by_name"] = d.pop("created_by_name") or ""
+        d["used_by_name"] = d.pop("used_by_name") or ""
+        result.append(d)
+    return result
+
+
+@app.delete("/api/admin/invites/{iid}")
+async def delete_invite(iid: str, request: Request):
+    """Delete an invite token. Admin only."""
+    admin = require_admin(request)
+    db = get_db()
+    row = db.execute("SELECT id FROM invites WHERE id=?", (iid,)).fetchone()
+    if not row:
+        db.close()
+        return JSONResponse({"error": "Invite not found"}, status_code=404)
+    db.execute("DELETE FROM invites WHERE id=?", (iid,))
+    db.commit()
+    db.close()
+    return {"ok": True}
+
+
 @app.get("/api/admin/users")
 async def list_users(request: Request):
     """List all users. Admin only."""
@@ -466,12 +584,17 @@ async def set_role(request: Request):
     if new_role not in ("admin", "user"):
         return JSONResponse({"error": "Role must be 'admin' or 'user'"}, status_code=400)
     db = get_db()
-    target = db.execute("SELECT id, role FROM users WHERE id=?", (target_id,)).fetchone()
+    target = db.execute("SELECT id, username, role FROM users WHERE id=?", (target_id,)).fetchone()
     if not target:
         db.close()
         return JSONResponse({"error": "User not found"}, status_code=404)
+    target_dict = dict(target)
+    # Cannot demote the default admin
+    if target_dict["username"] == DEFAULT_ADMIN_USER and new_role == "user":
+        db.close()
+        return JSONResponse({"error": f"Cannot demote the default admin ({DEFAULT_ADMIN_USER})"}, status_code=400)
     # Prevent demoting the last admin
-    if dict(target)["role"] == "admin" and new_role == "user":
+    if target_dict["role"] == "admin" and new_role == "user":
         admin_count = db.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0]
         if admin_count <= 1:
             db.close()
@@ -484,14 +607,22 @@ async def set_role(request: Request):
 
 @app.delete("/api/admin/users/{uid}")
 async def delete_user(uid: str, request: Request):
-    """Delete a user and all their data. Admin only. Cannot delete yourself."""
+    """Delete a user and all their data. Admin only. Cannot delete yourself or the default admin."""
     admin = require_admin(request)
     if uid == admin["id"]:
         return JSONResponse({"error": "Cannot delete your own account"}, status_code=400)
     db = get_db()
+    # Prevent deleting the default admin account
+    target = db.execute("SELECT id, username, role FROM users WHERE id=?", (uid,)).fetchone()
+    if not target:
+        db.close()
+        return JSONResponse({"error": "User not found"}, status_code=404)
+    target_dict = dict(target)
+    if target_dict["username"] == DEFAULT_ADMIN_USER:
+        db.close()
+        return JSONResponse({"error": "Cannot delete the default admin account"}, status_code=400)
     # Prevent deleting the last admin
-    target = db.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
-    if target and dict(target)["role"] == "admin":
+    if target_dict["role"] == "admin":
         admin_count = db.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0]
         if admin_count <= 1:
             db.close()

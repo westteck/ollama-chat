@@ -45,12 +45,30 @@ const colors = ['#7c4dff', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#e91e63'
  * If so, auto-login. Otherwise show the login screen.
  */
 window.onload = async () => {
-    // Check if initial setup is needed (no users yet)
+    // Check for invite token in URL hash: /#invite=xxx
+    const hash = window.location.hash;
+    const inviteMatch = hash.match(/invite=([A-Za-z0-9_-]+)/);
+    if (inviteMatch) {
+        showLogin();
+        const inviteEl = document.getElementById('inviteToken');
+        const inviteLabel = document.getElementById('inviteLabel');
+        if (inviteEl) { inviteEl.value = inviteMatch[1]; inviteEl.style.display = ''; }
+        if (inviteLabel) { inviteLabel.style.display = ''; }
+        window.location.hash = '';
+    }
+    // Check if initial setup is needed (no users yet — shouldn't happen, admin is auto-created)
     try {
         const setupResp = await fetch('/api/setup-status');
         const setupData = await setupResp.json();
         if (setupData.setup_needed) {
-            showSetupWizard();
+            // Fresh install — show login with hint about default admin
+            showLogin();
+            const errEl = document.getElementById('loginError');
+            if (errEl) errEl.textContent = '';
+            const hintEl = document.createElement('div');
+            hintEl.style.cssText = 'font-size:12px;color:var(--text-muted);margin-top:8px;text-align:center;';
+            hintEl.textContent = 'Default login: admin / admin123';
+            document.querySelector('.login-card').appendChild(hintEl);
             return;
         }
     } catch (e) { /* proceed to normal login */ }
@@ -68,69 +86,6 @@ function showLogin() {
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('mainApp').style.display = 'none';
     document.getElementById('loginInput').focus();
-}
-
-/** Show setup wizard for first-run (no users exist yet). */
-function showSetupWizard() {
-    const el = document.getElementById('loginScreen');
-    el.style.display = 'flex';
-    document.getElementById('mainApp').style.display = 'none';
-    const card = el.querySelector('.login-card');
-    card.innerHTML = `
-        <h1>◆ Welcome to Ollama Chat</h1>
-        <p>Create the admin account to get started</p>
-        <input type="text" id="setupUsername" placeholder="Admin username" maxlength="30"
-            onkeydown="if(event.key==='Enter')document.getElementById('setupPassword').focus()" />
-        <input type="password" id="setupPassword" placeholder="Password (min 4 chars)"
-            onkeydown="if(event.key==='Enter')document.getElementById('setupConfirm').focus()" />
-        <input type="password" id="setupConfirm" placeholder="Confirm password"
-            onkeydown="if(event.key==='Enter')doSetup()" />
-        <button onclick="doSetup()">Create Admin Account →</button>
-        <div class="login-error" id="setupError"></div>
-    `;
-}
-
-async function doSetup() {
-    const username = document.getElementById('setupUsername').value.trim();
-    const password = document.getElementById('setupPassword').value;
-    const confirm = document.getElementById('setupConfirm').value;
-    const errEl = document.getElementById('setupError');
-    errEl.textContent = '';
-    if (!username) { errEl.textContent = 'Please enter a username'; return; }
-    if (!password) { errEl.textContent = 'Please enter a password'; return; }
-    if (password.length < 4) { errEl.textContent = 'Password must be at least 4 characters'; return; }
-    if (password !== confirm) { errEl.textContent = 'Passwords do not match'; return; }
-    try {
-        const resp = await fetch('/api/login', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ username, password })
-        });
-        const data = await resp.json();
-        if (data.error) { errEl.textContent = data.error; return; }
-        localStorage.setItem('ollama-chat-user', JSON.stringify(data));
-        await loginWithId(data.user_id);
-        // Restore normal login card for future logins
-        restoreLoginCard();
-    } catch (e) { errEl.textContent = 'Connection error'; }
-}
-
-function restoreLoginCard() {
-    const el = document.getElementById('loginScreen');
-    const card = el.querySelector('.login-card');
-    card.innerHTML = `
-        <h1>◆ Ollama Chat</h1>
-        <p>Sign in or create an account</p>
-        <input type="text" id="loginInput" placeholder="Username" maxlength="30"
-            onkeydown="if(event.key==='Enter')document.getElementById('loginPassword').focus()" />
-        <input type="password" id="loginPassword" placeholder="Password"
-            onkeydown="if(event.key==='Enter'){const t=document.getElementById('totpCode');if(t&&t.style.display!=='none')t.focus();else doLogin();}" />
-        <input type="text" id="totpCode" placeholder="6-digit authenticator code"
-            style="display:none;"
-            onkeydown="if(event.key==='Enter')doLogin()" 
-            maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" />
-        <button id="loginBtn" onclick="doLogin()">Continue →</button>
-        <div class="login-error" id="loginError"></div>
-    `;
 }
 
 /** Hide the login screen and show the main app.
@@ -158,6 +113,8 @@ async function doLogin() {
     const name = document.getElementById('loginInput').value.trim();
     const password = document.getElementById('loginPassword').value;
     const totpCode = document.getElementById('totpCode').value.trim();
+    const inviteEl = document.getElementById('inviteToken');
+    const inviteToken = inviteEl ? inviteEl.value.trim() : '';
     const errEl = document.getElementById('loginError');
     const totpEl = document.getElementById('totpCode');
     errEl.textContent = '';
@@ -171,7 +128,7 @@ async function doLogin() {
     try {
         const resp = await fetch('/api/login', {
             method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ username: name, password: password, totp_code: totpCode })
+            body: JSON.stringify({ username: name, password: password, totp_code: totpCode, invite_token: inviteToken })
         });
         const data = await resp.json();
         if (data.error) {
@@ -181,6 +138,15 @@ async function doLogin() {
                 totpEl.style.display = '';
                 totpEl.focus();
                 document.getElementById('loginBtn').textContent = 'Verify →';
+                return;
+            }
+            // If invite token is required, show the invite field
+            if (data.invite_required) {
+                errEl.textContent = '';
+                if (inviteEl) inviteEl.style.display = '';
+                const inviteLabel = document.getElementById('inviteLabel');
+                if (inviteLabel) inviteLabel.style.display = '';
+                inviteEl.focus();
                 return;
             }
             errEl.textContent = data.error;
@@ -229,6 +195,11 @@ function doLogout() {
     // Reset TOTP login state
     const totpEl = document.getElementById('totpCode');
     if (totpEl) { totpEl.value = ''; totpEl.style.display = 'none'; }
+    // Reset invite token state
+    const inviteEl = document.getElementById('inviteToken');
+    if (inviteEl) { inviteEl.value = ''; inviteEl.style.display = 'none'; }
+    const inviteLabel = document.getElementById('inviteLabel');
+    if (inviteLabel) inviteLabel.style.display = 'none';
     const loginBtn = document.getElementById('loginBtn');
     if (loginBtn) loginBtn.textContent = 'Continue →';
 }
@@ -1517,9 +1488,58 @@ async function showAdminPanel() {
             list.appendChild(row);
         });
     } catch (e) { list.innerHTML = '<div style="color:var(--red)">Failed to load users</div>'; }
+    loadInvites();
 }
 
 function closeAdminPanel() { document.getElementById('adminModal').style.display = 'none'; }
+
+async function generateInvite() {
+    const el = document.getElementById('inviteResult');
+    try {
+        const resp = await api('/api/admin/invites', { method: 'POST' });
+        const data = await resp.json();
+        if (data.error) { el.style.color = 'var(--red)'; el.textContent = data.error; return; }
+        el.style.color = 'var(--green)';
+        el.textContent = '✓ Token created — copy it:';
+        // Build the full invite URL
+        const baseUrl = window.location.origin;
+        const inviteUrl = `${baseUrl}/#invite=${data.token}`;
+        // Show token with copy button
+        const tokenEl = document.createElement('div');
+        tokenEl.style.cssText = 'margin-top:8px;padding:8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;font-family:monospace;word-break:break-all;font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px;';
+        tokenEl.innerHTML = `<span style="flex:1;">${data.token}</span><button onclick="navigator.clipboard.writeText(this.parentElement.querySelector('span').textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" style="padding:4px 8px;background:var(--accent);color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Copy</button>`;
+        const linkEl = document.createElement('div');
+        linkEl.style.cssText = 'margin-top:4px;font-size:12px;color:var(--text-muted);';
+        linkEl.innerHTML = `Share link: <a href="${inviteUrl}" style="color:var(--accent);">${inviteUrl}</a>`;
+        el.appendChild(tokenEl);
+        el.appendChild(linkEl);
+        loadInvites();
+    } catch (e) { el.style.color = 'var(--red)'; el.textContent = 'Error: ' + e.message; }
+}
+
+async function loadInvites() {
+    const el = document.getElementById('inviteList');
+    try {
+        const resp = await api('/api/admin/invites');
+        const invites = await resp.json();
+        if (!invites.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No tokens yet</div>'; return; }
+        el.innerHTML = invites.map(inv => {
+            const status = inv.used ? `<span style="color:var(--text-muted);">Used by ${inv.used_by_name || 'unknown'}</span>` : `<span style="color:var(--green);">✓ Available</span>`;
+            return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+                <code style="flex:1;font-size:11px;word-break:break-all;color:var(--text-muted);">${inv.token.slice(0,12)}...</code>
+                ${status}
+                ${!inv.used ? `<button onclick="deleteInvite('${inv.id}')" style="font-size:11px;padding:2px 6px;background:#c62828;color:white;border:none;border-radius:3px;cursor:pointer;">Delete</button>` : ''}
+            </div>`;
+        }).join('');
+    } catch (e) { el.innerHTML = '<div style="color:var(--red);font-size:13px;">Failed to load invites</div>'; }
+}
+
+async function deleteInvite(iid) {
+    try {
+        await api(`/api/admin/invites/${iid}`, { method: 'DELETE' });
+        loadInvites();
+    } catch (e) { alert('Failed to delete invite'); }
+}
 
 async function setUserRole(uid, role) {
     try {

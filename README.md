@@ -4,8 +4,10 @@ Multi-user chat interface for Ollama with projects, file context, and searchable
 
 ## Features
 
-- **Multi-user** with username/password auth
+- **Invite-only registration** — admin generates tokens, new users need one to sign up
+- **Default admin account** — starts with `admin` / `admin123`
 - **Two-factor authentication** (TOTP) — Google Authenticator, Authy, Aegis, etc.
+- **Admin panel** — user management, role control, invite tokens (admin-only)
 - **Projects** with file context (PDF, text, code)
 - **Searchable message history** (full-text search)
 - **Agent profiles** per project (custom system prompt + model)
@@ -18,19 +20,11 @@ Multi-user chat interface for Ollama with projects, file context, and searchable
 ### Docker Compose (recommended)
 
 ```bash
-# Clone and configure
 git clone <your-repo-url> ollama-chat
 cd ollama-chat
-
-# Edit environment variables if needed
-# OLLAMA_BASE_URL — your Ollama instance URL (default: http://host.docker.internal:11434)
-# DEFAULT_MODEL — default model name (default: llama3.2)
-
-# Start
 docker compose up -d
-
 # Open http://localhost:8000
-# First user to register becomes admin
+# Default login: admin / admin123
 ```
 
 ### Manual / Development
@@ -40,22 +34,49 @@ pip install fastapi uvicorn httpx pypdf python-multipart bcrypt pyotp
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-## Two-Factor Authentication
+## Security
 
-1. Log in and open **Settings** (⚙ icon)
-2. Click **Enable 2FA** in the Two-Factor Authentication section
-3. Scan the QR code with any TOTP authenticator app
-4. Enter the 6-digit code to verify and enable
-5. On subsequent logins, you'll be prompted for your authenticator code after password
+### Authentication Flow
 
-## Exposing to the Internet
+1. **Admin creates invite tokens** in the admin panel
+2. New users enter username, password, **and invite token** to register
+3. No open registration — only invited users can create accounts
 
-For public access, put this behind a reverse proxy (Nginx Proxy Manager, Caddy, Traefik) with SSL:
+### Default Admin
 
-1. **Reverse proxy** with HTTPS (Let's Encrypt via DNS challenge)
-2. **2FA** (built-in TOTP) for user authentication
-3. **Rate limiting** via the proxy or fail2ban
-4. Optionally restrict admin endpoints at the proxy level
+- Username: `admin` / Password: `admin123`
+- Cannot be deleted or demoted from admin
+- **Change the password immediately** after first login
+
+### Reset Admin Password
+
+If you forget the admin password, reset it to default:
+
+```bash
+# Inside the container:
+python app.py --reset-admin
+
+# Or via docker:
+docker compose exec ollama-chat python app.py --reset-admin
+```
+
+This resets the admin password to `admin123` and disables 2FA on the account.
+
+### Two-Factor Authentication
+
+1. Open **Settings** (⚙ icon) → **Two-Factor Authentication**
+2. Click **Enable 2FA**, scan QR code with any TOTP app
+3. Enter the 6-digit code to verify and enable
+4. On subsequent logins, you'll be prompted for the code after your password
+
+### Exposing to the Internet
+
+For public access, put this behind a reverse proxy with SSL:
+
+1. **Reverse proxy** (Nginx Proxy Manager, Caddy, Traefik) with HTTPS
+2. **2FA** (built-in TOTP) for all user accounts
+3. **Invite-only registration** prevents random signups
+4. **Rate limiting** via the proxy or fail2ban
 
 ## Environment Variables
 
@@ -65,6 +86,8 @@ For public access, put this behind a reverse proxy (Nginx Proxy Manager, Caddy, 
 | `DEFAULT_MODEL` | `llama3.2` | Default model for new chats |
 | `DATA_DIR` | `/app/data` | Database directory |
 | `UPLOAD_DIR` | `/app/uploads` | File upload directory |
+| `DEFAULT_ADMIN_USER` | `admin` | Default admin username |
+| `DEFAULT_ADMIN_PASS` | `admin123` | Default admin password |
 
 ## Project Structure
 
